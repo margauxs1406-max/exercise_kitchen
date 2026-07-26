@@ -1,0 +1,132 @@
+name: exercise_kitchen
+description: >
+  Exercise Kitchen — application mobile coach / adhérent pour salle de sport
+  (méthode Functional Pattern). MVP : authentification, rôles coach/adhérent,
+  planning de la semaine, inscriptions (avec liste d'attente).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # --- Firebase (backend recommandé dans les spécifications techniques) ---
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  cloud_functions: ^5.1.4
+
+  # --- État / architecture ---
+  provider: ^6.1.2
+
+  # --- Utilitaires ---
+  intl: ^0.20.2
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.2 # mémorise l'email de connexion sur l'appareil
+  firebase_storage: ^12.4.10
+  image_picker: ^1.2.3
+  gal: ^2.3.2
+  firebase_messaging: ^15.2.10
+  flutter_svg: ^2.3.0
+  local_auth: ^3.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.7
+
+# Icône de l'application (nouveau, 22 juillet 2026) : ajout des couches
+# nécessaires aux "adaptive icons" Android (API 26+), pour que l'icône suive
+# le masque du thème de lancement du téléphone (rond, squircle, etc.) au lieu
+# de rester un carré plein fixe :
+#   - adaptive_icon_background : le fond uni, noir #222222 (= AppColors.black
+#     dans app_theme.dart), choisi par Margaux le 22 juillet 2026 pour rester
+#     cohérent avec le fond de démarrage (flutter_native_splash ci-dessous).
+#   - adaptive_icon_foreground : le dessin (les deux anneaux + le monogramme
+#     EK) isolé sur fond transparent — généré à partir de icon_ek.png en
+#     retirant le fond noir plein (voir icon_ek_foreground.png).
+#   - adaptive_icon_monochrome : même dessin, utilisé par Android 13+ pour
+#     l'icône "thématisée" en niveaux de gris/alpha (teintée automatiquement
+#     par le système selon le fond d'écran) — le fichier foreground convient
+#     tel quel car il est déjà en blanc + alpha (pas de couleur).
+# image_path (icon_ek.png, plein cadre) reste utilisé pour l'icône "legacy"
+# (pré-API 26) et pour iOS, qui n'a pas de notion de masque adaptatif.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon_ek.png"
+  remove_alpha_ios: true
+  adaptive_icon_background: "#222222"
+  adaptive_icon_foreground: "assets/icon/icon_ek_foreground.png"
+  adaptive_icon_monochrome: "assets/icon/icon_ek_foreground.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+  # Police du logo (section design, 21 juillet 2026) : appliquée pour
+  # l'instant aux titres (pop-up, en-tête, titres de page) — voir
+  # `app_theme.dart`. Toutes les graisses + italiques déclarées ici (fichiers
+  # à placer dans `assets/fonts/`, noms de fichiers Google Fonts standards)
+  # pour pouvoir aussi s'en servir ailleurs plus tard si besoin.
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Thin.ttf
+          weight: 100
+        - asset: assets/fonts/Poppins-ThinItalic.ttf
+          weight: 100
+          style: italic
+        - asset: assets/fonts/Poppins-ExtraLight.ttf
+          weight: 200
+        - asset: assets/fonts/Poppins-ExtraLightItalic.ttf
+          weight: 200
+          style: italic
+        - asset: assets/fonts/Poppins-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Poppins-LightItalic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/Poppins-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Poppins-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-MediumItalic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-SemiBoldItalic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Poppins-BoldItalic.ttf
+          weight: 700
+          style: italic
+        - asset: assets/fonts/Poppins-ExtraBold.ttf
+          weight: 800
+        - asset: assets/fonts/Poppins-ExtraBoldItalic.ttf
+          weight: 800
+          style: italic
+        - asset: assets/fonts/Poppins-Black.ttf
+          weight: 900
+        - asset: assets/fonts/Poppins-BlackItalic.ttf
+          weight: 900
+          style: italic
+
+flutter_native_splash:
+  color: "#222222"
+  android_12:
+    color: "#222222"

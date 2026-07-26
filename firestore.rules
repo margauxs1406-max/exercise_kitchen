@@ -1,0 +1,163 @@
+rules_version = '2';
+
+// Règles de sécurité Firestore — section 3 des spécifications techniques :
+// seul un coach peut créer un compte, voir l'ensemble des adhérents ou gérer
+// le planning ; un adhérent ne peut lire/modifier que les données de son
+// propre espace. Les inscriptions ne sont jamais écrites directement par le
+// client : uniquement par les Cloud Functions (Admin SDK), qui contournent
+// ces règles — d'où `allow write: if false` sur `registrations`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveCoach() {
+      return isSignedIn()
+        && myUserDoc().data.role == 'coach'
+        && myUserDoc().data.status == 'active';
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && myUserDoc().data.status == 'active';
+    }
+
+    // --- users ---
+    // Un coach peut tout lire/modifier. Un adhérent ne peut modifier que son
+    // propre document, et ne peut jamais changer son propre rôle ou statut
+    // (seul un coach clôture un compte, section 3).
+    //
+    // Lecture ouverte à tout utilisateur actif (coach ou adhérent), pas
+    // seulement soi-même : comme pour `registrations` ci-dessous, la pop-up
+    // "inscrits / liste d'attente" (voir `slot_roster_dialog.dart`) doit
+    // pouvoir résoudre le prénom/nom de TOUS les inscrits d'un créneau via
+    // `getUsersByIds` (requête `whereIn` sur l'id du document, que
+    // Firestore rejette pour un adhérent tant que la règle ne couvre pas
+    // chaque document qu'elle pourrait retourner). L'app n'affiche que le
+    // prénom/nom, mais techniquement l'ensemble de la fiche (email,
+    // téléphone, formules...) devient lisible par tout adhérent actif.
+    match /users/{userId} {
+      allow read: if isActiveUser();
+
+      allow update: if isActiveCoach()
+        || (
+          isSignedIn() && request.auth.uid == userId
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['role', 'status', 'email'])
+        );
+
+      // La création d'un compte adhérent passe exclusivement par la Cloud
+      // Function `createAdherentAccount` (Admin SDK) — jamais par le client.
+      allow create: if false;
+      allow delete: if false;
+    }
+
+    // --- progressPhotos (sous-collection de users) ---
+    // Section 1.2 / 2.1 : métadonnées (URL, angle, date) des photos de
+    // progression d'un adhérent — le fichier lui-même vit dans Firebase
+    // Storage (voir `storage.rules`, mêmes droits). Mêmes droits de lecture
+    // que la fiche adhérent elle-même (coach : toutes ; adhérent : les
+    // siennes uniquement) ; écriture réservée aux coachs (import), jamais
+    // par l'adhérent lui-même.
+    match /users/{userId}/progressPhotos/{photoId} {
+      allow read: if isActiveCoach() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isActiveCoach();
+    }
+
+    // --- courses / slots ---
+    // Lecture ouverte à tout utilisateur actif (coach ou adhérent) pour
+    // consulter le planning ; écriture réservée aux coachs. `registeredCount`
+    // / `waitlistCount` sur `slots` sont malgré tout maintenus uniquement
+    // par les Cloud Functions transactionnelles, jamais par une écriture
+    // directe du coach — les coachs ne modifient que la structure des cours.
+    match /courses/{courseId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveCoach();
+    }
+
+    match /slots/{slotId} {
+      allow read: if isActiveUser();
+      allow create, delete: if isActiveCoach();
+      allow update: if isActiveCoach()
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['registeredCount', 'waitlistCount']);
+    }
+
+    // --- weekTypes ---
+    // Section 1.4 : type de la semaine (basique / intermédiaire / dynamique)
+    // dans le cycle d'entraînement de 6 semaines. Lecture ouverte à tout
+    // utilisateur actif (le planning adhérent l'affiche en lecture seule),
+    // écriture réservée aux coachs.
+    match /weekTypes/{weekId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveCoach();
+    }
+
+    // --- closures ---
+    // Fermetures ponctuelles (section "ajouter un évènement > fermeture") :
+    // lecture ouverte à tout utilisateur actif (coach ET adhérents, affiché
+    // dans les deux plannings), écriture réservée aux coachs.
+    match /closures/{closureId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveCoach();
+    }
+
+    // --- rekoverySessions ---
+    // Section 2.4bis : un adhérent ne peut lire/créer que ses propres
+    // sessions ; un coach peut tout lire (pour anticiper). Modification et
+    // suppression : un coach peut tout, et un adhérent peut désormais
+    // modifier/supprimer SA PROPRE session (bouton "Modifier"/"Supprimer"
+    // sur sa ligne Rekovery, voir `rekovery_actions_sheet.dart`) — la
+    // modification lui interdit toutefois de changer `adherentUid` ou
+    // `adherentName` (il ne peut ajuster que `date`/`startTime`), pour
+    // qu'il ne puisse pas se réattribuer la session de quelqu'un d'autre.
+    match /rekoverySessions/{sessionId} {
+      allow read: if isActiveCoach()
+        || (isSignedIn() && resource.data.adherentUid == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.adherentUid == request.auth.uid;
+      allow update: if isActiveCoach()
+        || (
+          isSignedIn() && resource.data.adherentUid == request.auth.uid
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['adherentUid', 'adherentName'])
+        );
+      allow delete: if isActiveCoach()
+        || (isSignedIn() && resource.data.adherentUid == request.auth.uid);
+    }
+
+    // --- registrations ---
+    // Écritures exclusivement via les Cloud Functions `registerForSlot` /
+    // `cancelRegistration` (Admin SDK, qui contourne ces règles).
+    //
+    // Lecture ouverte à tout utilisateur actif (coach ou adhérent), et non
+    // plus limitée à l'adhérent concerné : la pop-up "inscrits / liste
+    // d'attente" (section 1.3bis / 2.2ter, voir `slot_roster_dialog.dart`)
+    // doit pouvoir afficher TOUS les inscrits et la liste d'attente d'un
+    // créneau, pas seulement la propre inscription de l'adhérent qui
+    // consulte — nécessaire pour la requête `watchRegistrationsForSlot`
+    // (filtrée par `slotId`, pas par `userId`), que Firestore rejetterait
+    // sinon pour un adhérent (une requête doit être prouvée conforme à la
+    // règle pour TOUS les documents qu'elle peut retourner). Les noms
+    // affichés dans la pop-up restent ceux des adhérents de la même salle
+    // (aucune donnée plus sensible que le prénom/nom n'est exposée ici, cf.
+    // `SlotRosterDialog`).
+    match /registrations/{registrationId} {
+      allow read: if isActiveUser();
+      allow write: if false;
+    }
+
+    // --- mail ---
+    // Collection consommée par l'extension Firebase "Trigger Email from
+    // Firestore" ; écrite uniquement par la Cloud Function
+    // `createAdherentAccount`, jamais accessible au client.
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+  }
+}

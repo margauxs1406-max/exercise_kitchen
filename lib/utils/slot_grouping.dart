@@ -1,0 +1,61 @@
+import '../models/closure_model.dart';
+import '../models/rekovery_session_model.dart';
+import '../models/slot_model.dart';
+
+/// Regroupe le planning d'une semaine (créneaux, fermetures, sessions
+/// rekovery — déjà filtrés/triés en amont si besoin) en une liste plate
+/// utilisable directement par un `ListView.builder`, mélangeant :
+/// - des marqueurs de jour ([DateTime], à minuit),
+/// - des [ClosureModel] (bandeau de fermeture, en tête de journée),
+/// - des [RekoverySessionModel] (ligne "thermomètre", après la fermeture),
+/// - des [SlotModel] (cartes de cours, triées par heure).
+///
+/// Un jour n'apparaît que s'il contient au moins un de ces trois éléments.
+List<Object> groupSlotsByDay(
+  List<SlotModel> slots, {
+  List<ClosureModel> closures = const [],
+  List<RekoverySessionModel> rekoverySessions = const [],
+}) {
+  DateTime dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  // Une fermeture peut désormais s'étendre sur plusieurs jours
+  // (`startDate`..`endDate`) : elle doit apparaître sur CHACUN des jours
+  // qu'elle couvre, pas seulement le premier — sinon son bandeau
+  // disparaîtrait dès le lendemain de sa création alors que la salle est
+  // toujours fermée ce jour-là.
+  bool closureCoversDay(ClosureModel c, DateTime day) =>
+      !day.isBefore(dayOf(c.startDate)) && !day.isAfter(dayOf(c.endDate));
+
+  final closureDays = <DateTime>{};
+  for (final c in closures) {
+    var day = dayOf(c.startDate);
+    final lastDay = dayOf(c.endDate);
+    while (!day.isAfter(lastDay)) {
+      closureDays.add(day);
+      day = day.add(const Duration(days: 1));
+    }
+  }
+
+  final days = <DateTime>{
+    ...slots.map((s) => dayOf(s.date)),
+    ...closureDays,
+    ...rekoverySessions.map((r) => dayOf(r.date)),
+  }.toList()
+    ..sort();
+
+  final result = <Object>[];
+  for (final day in days) {
+    result.add(day);
+
+    result.addAll(closures.where((c) => closureCoversDay(c, day)));
+
+    final dayRekovery = rekoverySessions.where((r) => dayOf(r.date) == day).toList()
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+    result.addAll(dayRekovery);
+
+    final daySlots = slots.where((s) => dayOf(s.date) == day).toList()
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+    result.addAll(daySlots);
+  }
+  return result;
+}

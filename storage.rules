@@ -1,0 +1,46 @@
+rules_version = '2';
+
+// Règles de sécurité Firebase Storage — pendant Firebase Storage lui-même
+// utilise sa propre syntaxe (distincte de firestore.rules), on retrouve ici
+// les mêmes fonctions `isActiveCoach()`/`isActiveUser()` en interrogeant
+// Firestore via `firestore.get(...)`, pour rester cohérent avec les règles
+// Firestore équivalentes.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUserDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveCoach() {
+      return isSignedIn()
+        && myUserDoc().data.role == 'coach'
+        && myUserDoc().data.status == 'active';
+    }
+
+    // --- progressPhotos ---
+    // Section 1.2 / 2.1 : photos de progression d'un adhérent (face, dos,
+    // profil gauche, profil droit), importées par un coach depuis sa
+    // fiche. Lecture : un coach voit toutes les photos ; un adhérent ne
+    // voit que les siennes (jamais celles d'un autre adhérent). Écriture
+    // (import) ET suppression réservées aux coachs — un adhérent ne peut
+    // jamais déposer ni supprimer un fichier lui-même. La sélection
+    // multiple + suppression côté coach vit dans `PhotoGalleryGrid`
+    // (`photo_gallery_grid.dart`).
+    match /progressPhotos/{adherentUid}/{fileName} {
+      allow read: if isActiveCoach()
+        || (isSignedIn() && request.auth.uid == adherentUid);
+      allow write: if isActiveCoach();
+      allow delete: if isActiveCoach();
+    }
+
+    // Par défaut, tout le reste du bucket est verrouillé.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
