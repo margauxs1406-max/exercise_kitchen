@@ -132,7 +132,7 @@ class _AddRekoveryDialogState extends State<_AddRekoveryDialog> {
       final timeLabel = _fmtTime(_selectedTime!);
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Rekovery prévu $dateLabel à $timeLabel — merci de nous prévenir !'),
+        content: Text('Rekovery prévu $dateLabel à $timeLabel.'),
       ));
     } catch (e) {
       if (!mounted) return;

@@ -29,6 +29,17 @@ class AppTheme {
   // tous les deux cette constante, donc rien d'autre à toucher ailleurs.
   static const String titleFontFamily = 'Poppins';
 
+  /// Resserrement de l'espacement entre les lettres des titres (police
+  /// Poppins), nouveau, 26 juillet 2026, à la demande de Margaux : -5% de
+  /// la taille de police du titre. Appliqué uniquement via
+  /// `appBarTheme.titleTextStyle`/`dialogTheme.titleTextStyle` ci-dessous
+  /// (pas sur [headerTitleStyle] directement, qui n'a pas de `fontSize`
+  /// propre) — `headerTitleStyle` hérite quand même de ce réglage car
+  /// Flutter fusionne un `TextStyle` avec le style ambiant de l'`AppBar`
+  /// (issu de `appBarTheme.titleTextStyle`) pour tout champ qu'il ne fixe
+  /// pas lui-même, dont `letterSpacing`.
+  static double titleLetterSpacing(double fontSize) => fontSize * -0.05;
+
   /// Style de texte du contenu de l'en-tête ([WeekHeader.weekTypeContent] —
   /// type de semaine, "Galerie", "Adhérent"). Ce contenu n'est pas un
   /// `AppBar(title: Text(...))` "classique" : chaque écran qui l'utilise
@@ -109,6 +120,7 @@ class AppTheme {
           fontFamily: titleFontFamily,
           fontWeight: FontWeight.bold,
           fontSize: context.sp(20),
+          letterSpacing: titleLetterSpacing(context.sp(20)),
           color: AppColors.white,
         ),
       ),
@@ -126,6 +138,7 @@ class AppTheme {
           fontFamily: titleFontFamily,
           fontWeight: FontWeight.bold,
           fontSize: context.sp(20),
+          letterSpacing: titleLetterSpacing(context.sp(20)),
           color: AppColors.black,
         ),
       ),

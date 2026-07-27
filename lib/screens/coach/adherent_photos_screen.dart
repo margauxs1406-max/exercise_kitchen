@@ -33,10 +33,13 @@ class _AdherentPhotosScreenState extends State<AdherentPhotosScreen> {
 
   bool get _uploading => _uploadingCamera || _uploadingGallery;
 
+  // Pas de sélection de date ici (26 juillet 2026, à la demande de
+  // Margaux) : une photo prise à l'instant avec l'appareil est forcément
+  // datée d'aujourd'hui — demander la date serait une étape inutile pour
+  // le coach. Seul l'import depuis la galerie (photos déjà existantes,
+  // potentiellement anciennes) garde le sélecteur de date, voir
+  // `_importFromGallery` ci-dessous.
   Future<void> _importFromCamera() async {
-    final date = await _pickDate();
-    if (date == null || !mounted) return;
-
     // `imageQuality: 85` : compression légère à la source, pour limiter le
     // poids uploadé (photos de progression prises régulièrement, pas besoin
     // du fichier brut de l'appareil).
@@ -44,7 +47,8 @@ class _AdherentPhotosScreenState extends State<AdherentPhotosScreen> {
         await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 85);
     if (photo == null || !mounted) return;
 
-    await _upload([photo], date, camera: true);
+    final now = DateTime.now();
+    await _upload([photo], DateTime(now.year, now.month, now.day), camera: true);
   }
 
   Future<void> _importFromGallery() async {
