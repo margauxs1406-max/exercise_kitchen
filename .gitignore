@@ -23,3 +23,8 @@ firebase-debug.*.log
 
 # OS
 .DS_Store
+
+# Signature de l'app (secrets, ne jamais publier)
+android/key.properties
+*.jks
+*.keystore
