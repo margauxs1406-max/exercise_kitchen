@@ -23,7 +23,9 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- Import des photos de progression (coach), voir adherent_photos_screen.dart -->
 	<key>NSCameraUsageDescription</key>
 	<string>Exercise Kitchen a besoin d'accéder à l'appareil photo pour prendre les photos de progression des adhérents.</string>
