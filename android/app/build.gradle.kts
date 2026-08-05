@@ -11,13 +11,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Signature de version release (27 juillet 2026) : lit android/key.properties
-// (jamais commité, voir .gitignore) pour signer l'app avec la vraie clé
-// d'upload plutôt qu'avec la clé de débogage — nécessaire pour la Play
-// Console. Si key.properties est absent (ex. sur une machine qui ne fait
-// que du débogage), keystoreProperties reste vide et la config release
-// échouera explicitement au moment de la signature plutôt que de retomber
-// silencieusement sur la clé de debug.
+// Signature de version release : lit android/key.properties (jamais commité,
+// voir .gitignore) pour signer l'app avec la vraie clé d'upload plutôt
+// qu'avec la clé de débogage — nécessaire pour la Play Console.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
@@ -39,10 +35,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.margauxsilva.exercise_kitchen"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -60,8 +53,7 @@ android {
 
     buildTypes {
         release {
-            // Signature réelle (clé "upload"), voir keystoreProperties
-            // ci-dessus — remplace l'ancienne clé de débogage.
+            // Signature réelle (clé "upload"), voir keystoreProperties ci-dessus.
             signingConfig = signingConfigs.getByName("release")
         }
     }
