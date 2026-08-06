@@ -102,6 +102,20 @@ class UserRepository {
     });
   }
 
+  /// Coach : ajuste manuellement le carnet Rekovery d'un adhérent "Rekovery
+  /// seul" (renouvellement, correction...) — voir
+  /// `UserModel.rekoveryCreditsRemaining`/`isRekoverySoloOnly`. Écriture
+  /// directe (pas une Cloud Function) : contrairement au
+  /// décompte/recrédit automatique à l'acceptation/l'annulation d'une
+  /// demande (voir `functions/src/index.ts`), qui doit être transactionnel
+  /// pour rester cohérent en cas d'actions concurrentes, cet ajustement
+  /// manuel par un coach de confiance n'a pas ce besoin d'atomicité.
+  Future<void> updateRekoveryCredits(String uid, int credits) {
+    return _firestore.collection('users').doc(uid).update({
+      'rekoveryCreditsRemaining': credits < 0 ? 0 : credits,
+    });
+  }
+
   /// Adhérent : active/désactive le déverrouillage biométrique depuis son
   /// écran de profil — pour l'instant un simple réglage enregistré (ne
   /// bloque pas encore réellement l'accès à l'app, voir

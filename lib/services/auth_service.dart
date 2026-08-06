@@ -32,16 +32,6 @@ class AuthService extends ChangeNotifier {
   bool get isLoading => _loading;
   bool get isSignedIn => _firebaseUser != null;
 
-  // Distingue, pour `AppLockGate`, une session restaurée automatiquement par
-  // Firebase au lancement (persistance native, aucun appel à `signIn` cette
-  // fois-ci) d'une reconnexion volontaire faite PENDANT ce lancement — sert
-  // à savoir s'il faut forcer une reconnexion par mot de passe pour les
-  // personnes n'utilisant pas le déverrouillage biométrique. Volontairement
-  // un simple champ en mémoire (jamais persisté) : il repart à `false`
-  // uniquement quand le processus redémarre, comme `AppLockGate`.
-  bool _hasExplicitlySignedIn = false;
-  bool get hasExplicitlySignedIn => _hasExplicitlySignedIn;
-
   Future<void> _onAuthStateChanged(User? user) async {
     _firebaseUser = user;
     if (user == null) {
@@ -76,10 +66,6 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<UserCredential> signIn({required String email, required String password}) {
-    // Posé AVANT l'appel (pas après) pour éviter toute course avec l'écoute
-    // de `authStateChanges()` ci-dessus, qui peut se déclencher dès que
-    // Firebase traite la connexion.
-    _hasExplicitlySignedIn = true;
     return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 

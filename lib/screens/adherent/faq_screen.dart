@@ -22,7 +22,7 @@ const List<_FaqEntry> _kFaqEntries = [
   _FaqEntry(
     "Que se passe-t-il si un cours est complet ?",
     "Tu peux rejoindre la liste d'attente. Si une place se libère, tu es "
-        "automatiquement inscrit(e) à sa place et prévenu(e) par notification.",
+        "automatiquement inscrit.e à sa place et prévenu.e par notification.",
   ),
   _FaqEntry(
     "Comment annuler mon inscription ?",

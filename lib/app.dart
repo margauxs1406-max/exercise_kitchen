@@ -7,6 +7,7 @@ import 'services/photo_repository.dart';
 import 'services/planning_repository.dart';
 import 'services/push_notification_service.dart';
 import 'services/registration_repository.dart';
+import 'services/rekovery_repository.dart';
 import 'services/user_repository.dart';
 import 'theme/app_theme.dart';
 import 'widgets/role_gate.dart';
@@ -22,6 +23,7 @@ class ExerciseKitchenApp extends StatelessWidget {
         Provider(create: (_) => UserRepository()),
         Provider(create: (_) => PlanningRepository()),
         Provider(create: (_) => RegistrationRepository()),
+        Provider(create: (_) => RekoveryRepository()),
         Provider(create: (_) => PhotoRepository()),
         Provider(create: (_) => PushNotificationService()),
       ],

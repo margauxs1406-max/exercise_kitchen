@@ -107,28 +107,26 @@ service cloud.firestore {
       allow write: if isActiveCoach();
     }
 
-    // --- rekoverySessions ---
-    // Section 2.4bis : un adhérent ne peut lire/créer que ses propres
-    // sessions ; un coach peut tout lire (pour anticiper). Modification et
-    // suppression : un coach peut tout, et un adhérent peut désormais
-    // modifier/supprimer SA PROPRE session (bouton "Modifier"/"Supprimer"
-    // sur sa ligne Rekovery, voir `rekovery_actions_sheet.dart`) — la
-    // modification lui interdit toutefois de changer `adherentUid` ou
-    // `adherentName` (il ne peut ajuster que `date`/`startTime`), pour
-    // qu'il ne puisse pas se réattribuer la session de quelqu'un d'autre.
-    match /rekoverySessions/{sessionId} {
-      allow read: if isActiveCoach()
-        || (isSignedIn() && resource.data.adherentUid == request.auth.uid);
-      allow create: if isSignedIn()
-        && request.resource.data.adherentUid == request.auth.uid;
-      allow update: if isActiveCoach()
-        || (
-          isSignedIn() && resource.data.adherentUid == request.auth.uid
-          && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['adherentUid', 'adherentName'])
-        );
-      allow delete: if isActiveCoach()
-        || (isSignedIn() && resource.data.adherentUid == request.auth.uid);
+    // --- rekoveryRequests ---
+    // Onglet dédié "Rekovery" (remplace l'ancien `rekoverySessions` : plus
+    // d'écriture directe côté client). Le cycle de vie complet — demande,
+    // acceptation, refus, contre-proposition, réponse à une
+    // contre-proposition, annulation — passe exclusivement par les Cloud
+    // Functions (Admin SDK, qui contourne ces règles) : le décompte/recrédit
+    // du carnet de 10 séances d'un adhérent "Rekovery seul"
+    // (`users/{uid}.rekoveryCreditsRemaining`) doit rester cohérent même en
+    // cas d'actions concurrentes — voir `functions/src/index.ts`.
+    //
+    // Lecture : ouverte à tout utilisateur actif (coach ET adhérents), même
+    // principe que `slots`/`closures` ci-dessus — depuis le 6 août 2026, les
+    // adhérents voient aussi les créneaux Rekovery réservés par les autres
+    // (utile pour choisir un créneau tranquille), avec le nom dénormalisé
+    // sur chaque document (`adherentName`). Le filtrage de ce qui est
+    // affiché (statuts visibles pour les demandes d'AUTRUI, couleur grisée)
+    // se fait côté client (`adherent_rekovery_screen.dart`), pas ici.
+    match /rekoveryRequests/{requestId} {
+      allow read: if isActiveUser();
+      allow write: if false;
     }
 
     // --- registrations ---

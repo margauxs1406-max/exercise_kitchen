@@ -6,6 +6,7 @@ import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import 'adherent_photos_screen.dart';
+import 'adherent_rekovery_history_screen.dart';
 
 const Map<String, String> _kFormulaLabels = {
   'collectif': 'Collectif',
@@ -90,6 +91,41 @@ class _AdherentDetailBody extends StatelessWidget {
     );
     if (result != null) {
       await repo.updatePhone(adherent.uid, result);
+    }
+  }
+
+  /// Coach : ajuste manuellement le carnet Rekovery — voir
+  /// `UserRepository.updateRekoveryCredits`. Plus de bouton "Renouveler
+  /// (10)" (retiré le 6 août 2026, faisait doublon avec le champ libre) : il
+  /// suffit d'écrire le nombre voulu, ce qui permet aussi de faire évoluer
+  /// la taille standard d'un carnet sans mise à jour de l'application.
+  Future<void> _editRekoveryCredits(BuildContext context) async {
+    final controller = TextEditingController(
+      text: (adherent.rekoveryCreditsRemaining ?? 0).toString(),
+    );
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.white,
+        surfaceTintColor: Colors.transparent,
+        title: const Text('CARNET REKOVERY'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Séances restantes'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, int.tryParse(controller.text.trim())),
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      await repo.updateRekoveryCredits(adherent.uid, result);
     }
   }
 
@@ -252,6 +288,70 @@ class _AdherentDetailBody extends StatelessWidget {
             ),
           ),
         ),
+        // Historique Rekovery : disponible pour TOUS les adhérents (pas
+        // seulement "Rekovery seul"), utile en cas de réclamation sur le
+        // nombre de séances ou de dégradation de l'espace (demande du 6
+        // août 2026).
+        SizedBox(height: context.hp(8)),
+        Card(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: context.wp(16), vertical: context.hp(16)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Historique Rekovery', style: Theme.of(context).textTheme.titleMedium),
+                SizedBox(height: context.hp(12)),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AdherentRekoveryHistoryScreen(adherent: adherent),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.orange),
+                  ),
+                  icon: const Icon(Icons.thermostat),
+                  label: const Text("Voir l'historique des séances"),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Carnet Rekovery : uniquement pour un adhérent "Rekovery seul"
+        // (aucune formule sportive) — celui avec un accès illimité (Rekovery
+        // en plus d'une formule sportive) n'a pas de carnet à gérer.
+        if (adherent.isRekoverySoloOnly) ...[
+          SizedBox(height: context.hp(8)),
+          Card(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.wp(16), vertical: context.hp(16)),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Carnet Rekovery', style: Theme.of(context).textTheme.titleMedium),
+                        SizedBox(height: context.hp(4)),
+                        Text(
+                          '${adherent.rekoveryCreditsRemaining ?? 0} séance'
+                          '${(adherent.rekoveryCreditsRemaining ?? 0) > 1 ? 's' : ''} restante'
+                          '${(adherent.rekoveryCreditsRemaining ?? 0) > 1 ? 's' : ''}',
+                          style: const TextStyle(color: AppColors.mediumGrey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => _editRekoveryCredits(context),
+                    tooltip: 'Modifier le carnet',
+                    icon: const Icon(Icons.edit, color: AppColors.mediumGrey),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         SizedBox(height: context.hp(8)),
         Card(
           child: Padding(

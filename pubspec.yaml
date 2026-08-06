@@ -4,7 +4,7 @@ description: >
   (méthode Functional Pattern). MVP : authentification, rôles coach/adhérent,
   planning de la semaine, inscriptions (avec liste d'attente).
 publish_to: "none"
-version: 0.1.0+5
+version: 0.1.0+6
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

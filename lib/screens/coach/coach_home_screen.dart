@@ -4,16 +4,19 @@ import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/week_header.dart';
+import 'coach_rekovery_screen.dart';
 import 'create_adherent_screen.dart';
 import 'manage_planning_screen.dart';
 
 /// Espace coach — section 1 des spécifications. Les deux coachs ont les
 /// mêmes droits (pas de hiérarchie), donc un seul écran sert les deux.
 ///
-/// Les deux onglets partagent maintenant le même en-tête ([WeekHeader] :
-/// logo à gauche, déconnexion à droite) — seul le contenu central change
-/// ("Adhérent" ici, le type de semaine côté Planning, géré directement par
-/// `manage_planning_screen.dart`).
+/// Trois onglets, dans l'ordre Adhérents / Planning (par défaut) / Rekovery
+/// (demande du 6 août 2026). Planning et Rekovery gèrent chacun leur propre
+/// en-tête ([WeekHeader]/[ManagePlanningScreen] pour le second,
+/// [CoachRekoveryScreen] pour le troisième) ; seul l'onglet Adhérents
+/// utilise l'en-tête externe ci-dessous (logo à gauche, déconnexion à
+/// droite, "Adhérent" au centre).
 class CoachHomeScreen extends StatefulWidget {
   const CoachHomeScreen({super.key});
 
@@ -22,34 +25,37 @@ class CoachHomeScreen extends StatefulWidget {
 }
 
 class _CoachHomeScreenState extends State<CoachHomeScreen> {
-  int _index = 0;
+  // Planning (index 1) reste sélectionné par défaut.
+  int _index = 1;
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     return Scaffold(
       appBar: _index == 0
-          ? null
-          : WeekHeader(
+          ? WeekHeader(
               onLogout: () => auth.signOut(),
               weekTypeContent: Text(
                 'Adhérent'.toUpperCase(),
                 style: AppTheme.headerTitleStyle,
               ),
-            ),
+            )
+          : null,
       body: IndexedStack(
         index: _index,
         children: const [
-          ManagePlanningScreen(),
           CreateAdherentScreen(),
+          ManagePlanningScreen(),
+          CoachRekoveryScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
           NavigationDestination(icon: Icon(Icons.people), label: 'Adhérents'),
+          NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
+          NavigationDestination(icon: Icon(Icons.thermostat), label: 'Rekovery'),
         ],
       ),
     );

@@ -50,6 +50,15 @@ class UserModel {
   // aussi côté Cloud Functions (`functions/src/index.ts`) pour ne pas
   // envoyer les notifications désactivées.
   final Map<String, bool> notificationPrefs;
+  // Onglet Rekovery (juillet/août 2026) : carnet de 10 séances pour un
+  // adhérent "Rekovery seul" (voir [isRekoverySoloOnly]) — `null` pour tout
+  // le monde d'autre (accès illimité, ou pas du tout la formule). Décrémenté
+  // uniquement à l'acceptation d'une demande par un coach (pas à la simple
+  // demande), recrédité si la séance est annulée avant la date — voir les
+  // Cloud Functions `coachAcceptRekoveryRequest`/`cancelRekoveryRequest`
+  // dans `functions/src/index.ts`. Modifiable manuellement par un coach
+  // depuis `adherent_detail_screen.dart` (ex. renouvellement du carnet).
+  final int? rekoveryCreditsRemaining;
 
   const UserModel({
     required this.uid,
@@ -67,6 +76,7 @@ class UserModel {
     this.formulas = const {},
     this.biometricUnlockEnabled = false,
     this.notificationPrefs = const {},
+    this.rekoveryCreditsRemaining,
   });
 
   String get fullName => '$firstName $lastName';
@@ -85,6 +95,14 @@ class UserModel {
 
   bool get isCoach => role == UserRole.coach;
   bool get isActive => status == AccountStatus.active;
+
+  /// Un adhérent "Rekovery seul" (aucune formule sportive, seulement
+  /// Rekovery) dispose d'un carnet limité à 10 séances (voir
+  /// [rekoveryCreditsRemaining]) au lieu d'un accès illimité — c'est ce
+  /// statut qui détermine si l'onglet Rekovery affiche le compteur en
+  /// temps réel, et si l'espace Rekovery devient le seul onglet visible
+  /// (pas de barre de navigation, voir `adherent_home_screen.dart`).
+  bool get isRekoverySoloOnly => formulas.length == 1 && formulas.contains('rekovery');
 
   factory UserModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data()!;
@@ -110,6 +128,7 @@ class UserModel {
                 ?.map((k, v) => MapEntry(k, v as bool)) ??
             const <String, bool>{}),
       },
+      rekoveryCreditsRemaining: data['rekoveryCreditsRemaining'] as int?,
     );
   }
 
@@ -129,5 +148,6 @@ class UserModel {
         'createdAt': Timestamp.fromDate(createdAt),
         'biometricUnlockEnabled': biometricUnlockEnabled,
         'notificationPrefs': notificationPrefs,
+        'rekoveryCreditsRemaining': rekoveryCreditsRemaining,
       };
 }

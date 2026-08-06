@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/closure_model.dart';
-import '../../models/rekovery_session_model.dart';
 import '../../models/slot_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/planning_repository.dart';
@@ -13,7 +12,6 @@ import '../../utils/week_utils.dart';
 import '../../widgets/closure_actions_sheet.dart';
 import '../../widgets/closure_banner.dart';
 import '../../widgets/day_header.dart';
-import '../../widgets/rekovery_line.dart';
 import '../../widgets/slot_actions_sheet.dart';
 import '../../widgets/slot_card.dart';
 import '../../widgets/slot_roster_dialog.dart';
@@ -32,9 +30,9 @@ import 'add_course_screen.dart';
 /// Le bouton "+" ouvre désormais [AddCourseScreen], qui couvre à la fois les
 /// cours ponctuels (individuel / duo) et les évènements (workshop /
 /// fermeture) — voir la section "ajouter au planning" des spécifications.
-/// Le planning affiché mélange créneaux, fermetures (bandeau) et sessions
-/// rekovery (ligne thermomètre, toutes visibles côté coach, avec le nom de
-/// l'adhérent) via [groupSlotsByDay].
+/// Le planning affiché mélange créneaux et fermetures (bandeau) via
+/// [groupSlotsByDay]. Rekovery a son propre onglet dédié côté coach (voir
+/// `coach_rekovery_screen.dart`), il n'apparaît plus ici.
 ///
 /// Cet écran possède son propre [Scaffold]/en-tête ([WeekHeader]) plutôt que
 /// de dépendre de l'AppBar partagée de `CoachHomeScreen` — voir
@@ -169,95 +167,70 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen> {
                   stream: repo.watchClosuresForWeek(_weekStart),
                   builder: (context, closuresSnapshot) {
                     final closures = closuresSnapshot.data ?? const <ClosureModel>[];
-                    return StreamBuilder<List<RekoverySessionModel>>(
-                      // Pas de filtre `onlyAdherentUid` : le coach voit les
-                      // sessions rekovery de tous les adhérents, avec leur nom.
-                      stream: repo.watchRekoveryForWeek(_weekStart),
-                      builder: (context, rekoverySnapshot) {
-                        final rekoverySessions =
-                            rekoverySnapshot.data ?? const <RekoverySessionModel>[];
+                    // Même logique que côté adhérent
+                    // (`weekly_planning_screen.dart`) : un jour entièrement
+                    // passé disparaît, mais uniquement pour la semaine en
+                    // cours ou une semaine future — dès qu'on navigue vers
+                    // une semaine entièrement passée, plus aucun filtre,
+                    // pour garder l'historique complet consultable.
+                    final today = _dayOf(DateTime.now());
+                    final isPastWeek = _dayOf(_weekStart)
+                        .add(const Duration(days: 6))
+                        .isBefore(today);
+                    final visibleSlots = isPastWeek
+                        ? slots
+                        : slots.where((s) => !_dayOf(s.date).isBefore(today)).toList();
+                    final visibleClosures = isPastWeek
+                        ? closures
+                        : closures
+                            .where((c) => !_dayOf(c.endDate).isBefore(today))
+                            .toList();
 
-                        // Même logique que côté adhérent
-                        // (`weekly_planning_screen.dart`) : un jour entièrement
-                        // passé disparaît, mais uniquement pour la semaine en
-                        // cours ou une semaine future — dès qu'on navigue vers
-                        // une semaine entièrement passée, plus aucun filtre,
-                        // pour garder l'historique complet consultable.
-                        final today = _dayOf(DateTime.now());
-                        final isPastWeek = _dayOf(_weekStart)
-                            .add(const Duration(days: 6))
-                            .isBefore(today);
-                        final visibleSlots = isPastWeek
-                            ? slots
-                            : slots.where((s) => !_dayOf(s.date).isBefore(today)).toList();
-                        final visibleClosures = isPastWeek
-                            ? closures
-                            : closures
-                                .where((c) => !_dayOf(c.endDate).isBefore(today))
-                                .toList();
-                        final visibleRekoverySessions = isPastWeek
-                            ? rekoverySessions
-                            : rekoverySessions
-                                .where((r) => !_dayOf(r.date).isBefore(today))
-                                .toList();
+                    if (visibleSlots.isEmpty && visibleClosures.isEmpty) {
+                      return const Center(
+                        child: Text('Aucun créneau cette semaine.'),
+                      );
+                    }
 
-                        if (visibleSlots.isEmpty &&
-                            visibleClosures.isEmpty &&
-                            visibleRekoverySessions.isEmpty) {
-                          return const Center(
-                            child: Text('Aucun créneau cette semaine.'),
+                    final items = groupSlotsByDay(
+                      visibleSlots,
+                      closures: visibleClosures,
+                    );
+                    return ListView.builder(
+                      padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
+                      itemCount: items.length,
+                      itemBuilder: (context, i) {
+                        final item = items[i];
+                        if (item is DateTime) {
+                          return DayHeader(date: item, isFirst: i == 0);
+                        }
+                        if (item is ClosureModel) {
+                          return ClosureBanner(
+                            closure: item,
+                            onLongPress: () => showClosureActionsSheet(context, item),
                           );
                         }
-
-                        final items = groupSlotsByDay(
-                          visibleSlots,
-                          closures: visibleClosures,
-                          rekoverySessions: visibleRekoverySessions,
-                        );
-                        return ListView.builder(
-                          padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
-                          itemCount: items.length,
-                          itemBuilder: (context, i) {
-                            final item = items[i];
-                            if (item is DateTime) {
-                              return DayHeader(date: item, isFirst: i == 0);
-                            }
-                            if (item is ClosureModel) {
-                              return ClosureBanner(
-                                closure: item,
-                                onLongPress: () => showClosureActionsSheet(context, item),
-                              );
-                            }
-                            if (item is RekoverySessionModel) {
-                              return RekoveryLine(
-                                session: item,
-                                showName: true,
-                                color: AppColors.orange,
-                              );
-                            }
-                            final slot = item as SlotModel;
-                            // Individuel / workshop : pas d'inscription libre,
-                            // donc pas de compteur d'inscrits pertinent — ni
-                            // de pop-up "inscrits / liste d'attente" (même
-                            // condition que `showCount`, voir plus bas).
-                            final showCount = slot.type != 'individual' && slot.type != 'workshop';
-                            // Appui long "Modifier / Supprimer" pour les
-                            // cours duo, individuel et workshop (pas les
-                            // collectifs, fixes et régénérés chaque
-                            // semaine). Les fermetures ont leur propre appui
-                            // long sur `ClosureBanner`, voir plus haut.
-                            final canEditOrDelete = slot.type == 'duo' ||
-                                slot.type == 'individual' ||
-                                slot.type == 'workshop';
-                            return SlotCard(
-                              slot: slot,
-                              highlightAlert: true,
-                              showCount: showCount,
-                              onTap: showCount ? () => showSlotRosterDialog(context, slot) : null,
-                              onLongPress:
-                                  canEditOrDelete ? () => showSlotActionsSheet(context, slot) : null,
-                            );
-                          },
+                        final slot = item as SlotModel;
+                        // Individuel / workshop : pas d'inscription libre,
+                        // donc pas de compteur d'inscrits pertinent — ni
+                        // de pop-up "inscrits / liste d'attente" (même
+                        // condition que `showCount`, voir plus bas).
+                        final showCount = slot.type != 'individual' && slot.type != 'workshop';
+                        // Appui long "Modifier / Supprimer" pour les
+                        // cours duo, individuel et workshop (pas les
+                        // collectifs, fixes et régénérés chaque
+                        // semaine). Les fermetures ont leur propre appui
+                        // long sur `ClosureBanner`, voir plus haut.
+                        final canEditOrDelete = slot.type == 'duo' ||
+                            slot.type == 'individual' ||
+                            slot.type == 'workshop';
+                        return SlotCard(
+                          slot: slot,
+                          highlightAlert: true,
+                          showCount: showCount,
+                          onTap: showCount ? () => showSlotRosterDialog(context, slot) : null,
+                          onLongPress:
+                              canEditOrDelete ? () => showSlotActionsSheet(context, slot) : null,
                         );
                       },
                     );

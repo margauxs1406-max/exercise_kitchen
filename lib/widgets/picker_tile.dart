@@ -11,7 +11,7 @@ import '../theme/responsive.dart';
 /// Extrait de `add_course_screen.dart` (où il stylait "Choisir une
 /// date"/"Choisir une heure" pour l'ajout d'un cours duo côté coach) afin
 /// d'être réutilisé tel quel ailleurs avec exactement le même rendu — par
-/// exemple dans `add_rekovery_dialog.dart` — sans dupliquer le style.
+/// exemple dans `adherent_rekovery_screen.dart` — sans dupliquer le style.
 ///
 /// [stackedLabel] : si fourni, bascule sur un affichage en deux lignes —
 /// icône + ce texte court ("Début"/"Fin") sur la première, la valeur

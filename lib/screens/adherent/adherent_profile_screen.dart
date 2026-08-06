@@ -108,7 +108,7 @@ class _ProfileBody extends StatelessWidget {
           const SnackBar(
             content: Text(
               "Ton appareil ne permet pas le déverrouillage biométrique "
-              "(empreinte / Face ID non configuré(e) dans ses réglages).",
+              "(empreinte / Face ID non configuré.e dans ses réglages).",
             ),
           ),
         );

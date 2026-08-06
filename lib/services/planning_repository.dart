@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../data/default_collective_schedule.dart';
 import '../models/closure_model.dart';
-import '../models/rekovery_session_model.dart';
 import '../models/slot_model.dart';
 
 /// Section 1.4 : les 6 types de semaine du cycle d'entraînement (2
@@ -62,8 +61,6 @@ class PlanningRepository {
       _firestore.collection('weekTypes');
   CollectionReference<Map<String, dynamic>> get _closures =>
       _firestore.collection('closures');
-  CollectionReference<Map<String, dynamic>> get _rekoverySessions =>
-      _firestore.collection('rekoverySessions');
 
   /// Identifiant de document `weekTypes` : le lundi de la semaine, au format
   /// `AAAA-MM-JJ` (stable, lisible, sans dépendre de l'heure/fuseau).
@@ -486,9 +483,9 @@ class PlanningRepository {
   /// puisque plus personne ne les requête une fois le créneau disparu (et,
   /// si le créneau est recréé plus tard par [updateClosure], le nouveau
   /// document a un nouvel identifiant : les inscriptions existantes restent
-  /// orphelines plutôt que de s'y raccrocher). Les sessions Rekovery ne
-  /// sont volontairement pas touchées ici : ce ne sont pas des "cours" au
-  /// sens du planning.
+  /// orphelines plutôt que de s'y raccrocher). Les demandes Rekovery (voir
+  /// `rekovery_repository.dart`) ne sont volontairement pas touchées ici :
+  /// ce ne sont pas des "cours" au sens du planning.
   Future<void> addClosure({
     required DateTime startDate,
     required DateTime endDate,
@@ -594,30 +591,10 @@ class PlanningRepository {
     await batch.commit();
   }
 
-  /// Sessions rekovery (section 2.4bis) prévues dans la semaine dont le
-  /// lundi est [weekStart]. Si [onlyAdherentUid] est fourni, ne renvoie que
-  /// les sessions de cet adhérent (utilisé côté planning adhérent, qui ne
-  /// doit voir que ses propres réservations) ; sinon toutes (côté coach).
-  Stream<List<RekoverySessionModel>> watchRekoveryForWeek(
-    DateTime weekStart, {
-    String? onlyAdherentUid,
-  }) {
-    final weekEnd = weekStart.add(const Duration(days: 7));
-    Query<Map<String, dynamic>> query = _rekoverySessions
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(weekStart))
-        .where('date', isLessThan: Timestamp.fromDate(weekEnd));
-    if (onlyAdherentUid != null) {
-      query = query.where('adherentUid', isEqualTo: onlyAdherentUid);
-    }
-    return query
-        .snapshots()
-        .map((snap) => snap.docs.map(RekoverySessionModel.fromFirestore).toList());
-  }
-
   /// Toutes les fermetures existantes, en une fois (pas un flux) — utilisé
-  /// pour empêcher un adhérent de choisir un jour fermé lors de l'ajout
-  /// d'une session Rekovery (voir `add_rekovery_dialog.dart`). Récupère tout
-  /// plutôt que de filtrer côté Firestore, comme [_closedDaysInRange] /
+  /// pour empêcher un adhérent de choisir un jour fermé lors d'une demande
+  /// Rekovery (voir `rekovery_repository.dart`). Récupère tout plutôt que de
+  /// filtrer côté Firestore, comme [_closedDaysInRange] /
   /// [watchClosuresForWeek] : une fermeture chevauche une plage sur deux
   /// champs, ce que Firestore ne permet pas nativement sans index composite,
   /// et le nombre de fermetures reste de toute façon faible pour une seule
@@ -625,46 +602,5 @@ class PlanningRepository {
   Future<List<ClosureModel>> fetchAllClosures() async {
     final snap = await _closures.get();
     return snap.docs.map(ClosureModel.fromFirestore).toList();
-  }
-
-  /// Adhérent (formule "Rekovery") : indique l'heure à laquelle il compte
-  /// utiliser l'espace rekovery aujourd'hui, pour que les coachs puissent
-  /// anticiper (ex. allumer le sauna avant son arrivée).
-  Future<void> addRekoverySession({
-    required DateTime date,
-    required String startTime,
-    required String adherentUid,
-    required String adherentName,
-  }) async {
-    await _rekoverySessions.add(RekoverySessionModel(
-      id: '',
-      date: date,
-      startTime: startTime,
-      adherentUid: adherentUid,
-      adherentName: adherentName,
-    ).toFirestore());
-  }
-
-  /// Adhérent : modifie la date/heure de sa propre session Rekovery déjà
-  /// créée (appui sur sa ligne dans le planning, voir
-  /// `rekovery_actions_sheet.dart`). Écriture directe : les règles
-  /// Firestore autorisent désormais l'adhérent propriétaire à modifier sa
-  /// session (sans toucher à `adherentUid`/`adherentName`), en plus du
-  /// coach — voir `firestore.rules`.
-  Future<void> updateRekoverySession({
-    required String sessionId,
-    required DateTime date,
-    required String startTime,
-  }) {
-    return _rekoverySessions.doc(sessionId).update({
-      'date': Timestamp.fromDate(date),
-      'startTime': startTime,
-    });
-  }
-
-  /// Adhérent : supprime sa propre session Rekovery (un coach le peut
-  /// aussi, comme avant).
-  Future<void> deleteRekoverySession(String sessionId) {
-    return _rekoverySessions.doc(sessionId).delete();
   }
 }

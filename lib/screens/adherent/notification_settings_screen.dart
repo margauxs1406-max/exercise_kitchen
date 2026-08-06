@@ -39,13 +39,13 @@ const List<NotificationTypeInfo> kNotificationTypes = [
   NotificationTypeInfo(
     key: 'courseReminder',
     label: 'Rappel de cours',
-    description: 'Un rappel 2h avant un cours auquel tu es inscrit(e).',
+    description: 'Un rappel 2h avant un cours auquel tu es inscrit.e.',
     requiredFormulas: {'collectif', 'duo', 'individuel'},
   ),
   NotificationTypeInfo(
     key: 'waitlistPromoted',
     label: "Promotion depuis la liste d'attente",
-    description: "Une place se libère et tu passes de la liste d'attente à inscrit(e).",
+    description: "Une place se libère et tu passes de la liste d'attente à inscrit.e.",
     requiredFormulas: {'collectif', 'duo'},
   ),
   NotificationTypeInfo(
@@ -57,7 +57,7 @@ const List<NotificationTypeInfo> kNotificationTypes = [
   NotificationTypeInfo(
     key: 'sameDayDoubleBooking',
     label: 'Double inscription le même jour',
-    description: 'Tu es inscrit(e) à deux cours le même jour — évite les oublis.',
+    description: 'Tu es inscrit.e à deux cours le même jour — évite les oublis.',
     requiredFormulas: {'collectif', 'duo'},
   ),
   NotificationTypeInfo(
@@ -67,9 +67,16 @@ const List<NotificationTypeInfo> kNotificationTypes = [
     requiredFormulas: {'duo', 'individuel'},
   ),
   NotificationTypeInfo(
+    key: 'rekoveryStatusChanged',
+    label: 'Réponse à une demande Rekovery',
+    description: 'Le coach accepte, refuse ou propose un autre créneau pour '
+        'ta demande Rekovery.',
+    requiredFormulas: {'rekovery'},
+  ),
+  NotificationTypeInfo(
     key: 'workshopClosureBroadcast',
     label: 'Workshops et fermetures',
-    description: "Un nouveau workshop ou une fermeture de la salle est annoncé(e).",
+    description: "Un nouveau workshop ou une fermeture de la salle est annoncé.e.",
     // Toujours affiché : concerne tout le monde, quelle que soit la formule.
   ),
 ];

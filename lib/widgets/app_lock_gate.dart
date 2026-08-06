@@ -10,18 +10,27 @@ import '../theme/responsive.dart';
 /// Verrou d'accès à l'app posé pour tout adhérent (jamais pour un coach —
 /// choix explicite de Margaux) :
 /// - déverrouillage biométrique activé (switch du profil adhérent,
-///   `adherent_profile_screen.dart`) → prompt biométrique ;
-/// - sinon → reconnexion complète par mot de passe obligatoire (retour à
-///   `LoginScreen`, via une déconnexion forcée déclenchée ici).
-///
-/// Dans les deux cas, ce verrou ne se déclenche QUE lors d'un lancement "à
-/// froid" du processus (app réellement fermée, ou tuée par l'OS, puis
-/// rouverte) — jamais lors d'un simple passage en arrière-plan suivi d'un
-/// retour au premier plan. Le mécanisme est le même pour les deux : des
-/// variables STATIQUES en mémoire (jamais persistées sur disque), qui ne
-/// repartent à leur valeur initiale que lorsque le processus redémarre (le
-/// processus, et donc ces variables, survivent intacts à un simple passage
-/// en arrière-plan).
+///   `adherent_profile_screen.dart`) → prompt biométrique, à chaque
+///   lancement "à froid" du processus (app réellement fermée, ou tuée par
+///   l'OS, puis rouverte) — jamais lors d'un simple passage en arrière-plan
+///   suivi d'un retour au premier plan. Mécanisme géré par [_unlockedThisLaunch],
+///   une variable STATIQUE en mémoire (jamais persistée sur disque), qui ne
+///   repart à `false` que lorsque le processus redémarre.
+/// - sinon → **aucun verrou** (depuis le 6 août 2026, demande explicite de
+///   Margaux) : une fois connecté.e une première fois, l'adhérent reste
+///   connecté indéfiniment (fermeture complète de l'app, arrière-plan,
+///   redémarrage du téléphone...), jusqu'à une déconnexion manuelle — la
+///   persistance native de Firebase Auth s'applique donc sans restriction
+///   supplémentaire. **Avant ce changement**, une session restaurée
+///   automatiquement par Firebase au lancement (sans nouvel appel explicite
+///   à `AuthService.signIn`) déclenchait une déconnexion forcée pour
+///   ramener vers `LoginScreen` — ce mécanisme a été retiré : ni l'app
+///   Flutter ni Firebase Auth ne peuvent distinguer de façon fiable "l'app a
+///   été fermée" de "le téléphone a redémarré" (les deux se traduisent par
+///   un processus qui repart de zéro), donc il n'existait aucun moyen de
+///   forcer la reconnexion UNIQUEMENT après un redémarrage du téléphone sans
+///   la forcer aussi après une simple fermeture — ce qui aurait recréé
+///   exactement le problème que Margaux voulait résoudre.
 class AppLockGate extends StatefulWidget {
   final UserModel user;
   final Widget child;
@@ -41,30 +50,13 @@ class _AppLockGateState extends State<AppLockGate> {
   @override
   void initState() {
     super.initState();
-    if (widget.user.biometricUnlockEnabled) {
-      if (!_unlockedThisLaunch) {
-        // Déclenche le prompt automatiquement dès l'affichage de l'écran de
-        // verrouillage, sans attendre un appui sur "Déverrouiller".
-        WidgetsBinding.instance.addPostFrameCallback((_) => _attemptUnlock());
-      }
-    } else if (!widget.user.isCoach) {
-      _maybeForceRelogin();
+    if (widget.user.biometricUnlockEnabled && !_unlockedThisLaunch) {
+      // Déclenche le prompt automatiquement dès l'affichage de l'écran de
+      // verrouillage, sans attendre un appui sur "Déverrouiller".
+      WidgetsBinding.instance.addPostFrameCallback((_) => _attemptUnlock());
     }
-  }
-
-  /// Pas de biométrie activée (et pas un coach) : si la session actuelle
-  /// vient d'une restauration automatique de Firebase au lancement — donc
-  /// PAS d'un appel explicite à `AuthService.signIn` pendant ce lancement,
-  /// voir `hasExplicitlySignedIn` — on déconnecte immédiatement pour forcer
-  /// une reconnexion par mot de passe. Si la personne vient au contraire de
-  /// se (re)connecter explicitement pendant ce même lancement (juste après
-  /// avoir tapé son mot de passe), on ne fait rien : ce n'est pas une
-  /// session restaurée, pas besoin de la couper aussitôt.
-  void _maybeForceRelogin() {
-    final auth = context.read<AuthService>();
-    if (!auth.hasExplicitlySignedIn) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => auth.signOut());
-    }
+    // Pas de biométrie activée : aucun verrou (voir doc de classe ci-dessus,
+    // mise à jour du 6 août 2026) — on laisse simplement passer.
   }
 
   Future<void> _attemptUnlock() async {
@@ -87,17 +79,6 @@ class _AppLockGateState extends State<AppLockGate> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthService>();
-
-    if (!widget.user.biometricUnlockEnabled &&
-        !widget.user.isCoach &&
-        !auth.hasExplicitlySignedIn) {
-      // Écran neutre le temps que la déconnexion forcée (déclenchée dans
-      // `initState`) prenne effet — évite d'afficher, ne serait-ce qu'une
-      // frame, le contenu de l'app avant de rediriger vers la connexion.
-      return const Scaffold(backgroundColor: AppColors.black, body: SizedBox.shrink());
-    }
-
     if (!widget.user.biometricUnlockEnabled || _unlockedThisLaunch) {
       return widget.child;
     }

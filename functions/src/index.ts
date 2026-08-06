@@ -274,6 +274,66 @@ function formatDayOnly(date: admin.firestore.Timestamp): string {
   return `${weekday} ${dayMonth}`;
 }
 
+/** Vrai si [date] correspond au jour calendaire actuel, une fois interprétée
+ * dans le fuseau de Nouméa — utilisé pour alléger les messages concernant un
+ * créneau du jour même (pas besoin de redonner la date). */
+function isTodayInNoumea(date: Date): boolean {
+  const fmt: Intl.DateTimeFormatOptions = {
+    timeZone: NOUMEA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  };
+  return (
+    new Intl.DateTimeFormat("fr-FR", fmt).format(date) ===
+    new Intl.DateTimeFormat("fr-FR", fmt).format(new Date())
+  );
+}
+
+/** "12h" (sans minutes si l'heure est ronde) ou "16h30" — format court de
+ * l'heure, utilisé dans les messages concernant le jour même (26/07/2026,
+ * demande de Margaux). */
+function formatTimeShort(hhmm: string): string {
+  const [hh, mm] = hhmm.split(":");
+  return mm === "00" ? `${hh}h` : `${hh}h${mm}`;
+}
+
+/** "20/07 à 18h00" — date courte + heure, sans le nom du jour (contrairement
+ * à `formatSlotWhen`) — utilisé pour les messages de modification, où la
+ * date précise reste utile mais pas le jour de la semaine. */
+function formatDateAt(slotDate: admin.firestore.Timestamp, startTime: string): string {
+  const dayMonth = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: NOUMEA_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+  }).format(slotDate.toDate());
+  return `${dayMonth} à ${startTime.replace(":", "h")}`;
+}
+
+/** Clause "au Collectif de 12h" (jour même) ou "à Collectif lundi 20/07 à
+ * 12h00" (autre jour), à insérer après "Tu es inscrit.e " dans les messages
+ * de confirmation de place (nouvelle place directe, promotion liste
+ * d'attente, rappel 2h avant) — la date complète est inutile quand le cours
+ * a lieu aujourd'hui même (26/07/2026, demande de Margaux). */
+function registeredClause(
+  courseTitle: string,
+  slotDate: admin.firestore.Timestamp,
+  startTime: string
+): string {
+  if (isTodayInNoumea(slotDate.toDate())) {
+    return `au ${courseTitle} de ${formatTimeShort(startTime)}`;
+  }
+  return `à ${courseTitle} ${formatSlotWhen(slotDate, startTime)}`;
+}
+
+/** "de demain 18h" ou "de 18h" (jour même, cas du lundi où l'alerte part 4h
+ * avant plutôt que 24h) — utilisé dans le message envoyé à l'unique
+ * inscrit(e) d'un créneau, voir `checkSingleRegistrantSlots`. */
+function loneRegistrantClause(slotDate: admin.firestore.Timestamp, startTime: string): string {
+  const timeShort = formatTimeShort(startTime);
+  return isTodayInNoumea(slotDate.toDate()) ? `de ${timeShort}` : `de demain ${timeShort}`;
+}
+
 /** "le 20/07" ou "du 20/07 au 22/07" selon que la fermeture dure un seul
  * jour ou plusieurs. */
 function formatClosureWhen(
@@ -398,7 +458,7 @@ export const registerForSlot = onCall(
     if (!existing.empty) {
       throw new HttpsError(
         "already-exists",
-        "Tu es déjà inscrit(e) ou en liste d'attente sur ce créneau."
+        "Tu es déjà inscrit.e ou en liste d'attente sur ce créneau."
       );
     }
 
@@ -527,11 +587,474 @@ export const cancelRegistration = onCall(
       await sendPushToTokens(
         tokens,
         "Une place s'est libérée !",
-        `Tu es inscrit(e) à ${result.courseTitle} ${formatSlotWhen(result.slotDate, result.startTime)}.`
+        `Tu es inscrit.e ${registeredClause(result.courseTitle, result.slotDate, result.startTime)}.`
       );
     }
 
     return result;
+  }
+);
+
+// ---------------------------------------------------------------------
+// Rekovery — demandes de créneau (onglet dédié, remplace l'ancien système
+// de sessions mêlées au planning). Cycle de vie complet : voir
+// `rekovery_request_model.dart` côté Flutter (pending → accepted / proposed
+// → accepted|cancelled / refused / cancelled).
+// ---------------------------------------------------------------------
+
+/**
+ * Vrai si l'adhérent (formules du document `users/{uid}`) n'a QUE la
+ * formule "Rekovery", sans formule sportive — c'est cet adhérent qui
+ * dispose d'un carnet limité à 10 séances (`rekoveryCreditsRemaining`),
+ * décompté uniquement à l'acceptation d'une demande (jamais à la simple
+ * demande côté adhérent). Pendant serveur de `UserModel.isRekoverySoloOnly`
+ * côté Flutter — la vérité côté crédit doit rester serveur, jamais confiée
+ * au client.
+ */
+function isRekoverySoloOnly(formulas: string[] | undefined): boolean {
+  const list = formulas ?? [];
+  return list.length === 1 && list.includes("rekovery");
+}
+
+/**
+ * Adhérent (formule "Rekovery") : crée une demande de créneau pour la
+ * date/heure choisies. Ne vérifie/décompte PAS le carnet ici — seule
+ * l'acceptation par un coach (ou d'une contre-proposition) décompte une
+ * séance (voir [coachAcceptRekoveryRequest]/[respondToRekoveryProposal]).
+ */
+export const requestRekoverySlot = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
+
+    const { date, startTime } = request.data as { date?: string; startTime?: string };
+    if (!date || !startTime) {
+      throw new HttpsError("invalid-argument", "date et startTime requis.");
+    }
+
+    const userDoc = await db.collection("users").doc(uid).get();
+    const userData = userDoc.data();
+    if (!userDoc.exists || userData?.status !== "active") {
+      throw new HttpsError("permission-denied", "Compte introuvable ou inactif.");
+    }
+    const formulas = (userData?.formulas as string[] | undefined) ?? [];
+    if (!formulas.includes("rekovery")) {
+      throw new HttpsError(
+        "permission-denied",
+        "La formule Rekovery n'est pas souscrite sur ce compte."
+      );
+    }
+
+    const adherentName = `${userData?.firstName ?? ""} ${
+      ((userData?.lastName as string | undefined) ?? "").charAt(0)
+    }`.trim();
+
+    const dateTimestamp = admin.firestore.Timestamp.fromDate(new Date(date));
+
+    const reqRef = db.collection("rekoveryRequests").doc();
+    await reqRef.set({
+      adherentUid: uid,
+      adherentName,
+      date: dateTimestamp,
+      startTime,
+      status: "pending",
+      proposedDate: null,
+      proposedStartTime: null,
+      coachNote: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const tokens = await getCoachTokens();
+    await sendPushToTokens(
+      tokens,
+      "Nouvelle demande Rekovery",
+      `${adherentName} demande un créneau ${formatDateAt(dateTimestamp, startTime)}.`
+    );
+
+    return { requestId: reqRef.id };
+  }
+);
+
+/**
+ * Coach : accepte une demande [pending] telle quelle (date/heure
+ * inchangées). Pour un adhérent "Rekovery seul", décompte une séance du
+ * carnet — échoue si le carnet est déjà à 0.
+ */
+export const coachAcceptRekoveryRequest = onCall(
+  { region: REGION },
+  async (request) => {
+    await requireCoach(request.auth?.uid);
+
+    const { requestId } = request.data as { requestId?: string };
+    if (!requestId) throw new HttpsError("invalid-argument", "requestId requis.");
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+
+    const result = await db.runTransaction(async (tx) => {
+      const reqSnap = await tx.get(reqRef);
+      if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+      const reqData = reqSnap.data()!;
+      if (reqData.status !== "pending") {
+        throw new HttpsError("failed-precondition", "Cette demande n'est plus en attente.");
+      }
+
+      const userRef = db.collection("users").doc(reqData.adherentUid as string);
+      const userSnap = await tx.get(userRef);
+      const userData = userSnap.data();
+      const formulas = (userData?.formulas as string[] | undefined) ?? [];
+
+      if (isRekoverySoloOnly(formulas)) {
+        const remaining = (userData?.rekoveryCreditsRemaining as number | undefined) ?? 0;
+        if (remaining <= 0) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Le carnet Rekovery de cet adhérent est épuisé."
+          );
+        }
+        tx.update(userRef, { rekoveryCreditsRemaining: remaining - 1 });
+      }
+
+      tx.update(reqRef, { status: "accepted" });
+
+      return {
+        adherentUid: reqData.adherentUid as string,
+        date: reqData.date as admin.firestore.Timestamp,
+        startTime: reqData.startTime as string,
+      };
+    });
+
+    const tokens = await getTokensForUids([result.adherentUid], "rekoveryStatusChanged");
+    await sendPushToTokens(
+      tokens,
+      "Rekovery confirmé",
+      `Ta séance Rekovery ${formatDateAt(result.date, result.startTime)} est confirmée.`
+    );
+
+    return { ok: true };
+  }
+);
+
+/**
+ * Coach : refuse une demande [pending] ou [proposed] — aucun crédit
+ * décompté. [note], si fourni, est affiché à l'adhérent (motif du refus).
+ */
+export const coachRefuseRekoveryRequest = onCall(
+  { region: REGION },
+  async (request) => {
+    await requireCoach(request.auth?.uid);
+
+    const { requestId, note } = request.data as { requestId?: string; note?: string };
+    if (!requestId) throw new HttpsError("invalid-argument", "requestId requis.");
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+    const reqData = reqSnap.data()!;
+    if (reqData.status !== "pending" && reqData.status !== "proposed") {
+      throw new HttpsError("failed-precondition", "Cette demande ne peut plus être refusée.");
+    }
+
+    await reqRef.update({ status: "refused", coachNote: note ?? null });
+
+    const tokens = await getTokensForUids(
+      [reqData.adherentUid as string],
+      "rekoveryStatusChanged"
+    );
+    await sendPushToTokens(
+      tokens,
+      "Demande Rekovery refusée",
+      note
+        ? `Ta demande Rekovery ${formatDateAt(reqData.date, reqData.startTime)} a été refusée : ${note}`
+        : `Ta demande Rekovery ${formatDateAt(reqData.date, reqData.startTime)} a été refusée.`
+    );
+
+    return { ok: true };
+  }
+);
+
+/**
+ * Coach : propose une autre date/heure plutôt que d'accepter/refuser
+ * directement une demande [pending]. La demande passe à [proposed], en
+ * attente de la réponse de l'adhérent (voir [respondToRekoveryProposal]).
+ *
+ * Pas de champ de message libre pour le coach ici (retiré le 6 août 2026,
+ * voir `coach_rekovery_actions_sheet.dart`) — [coachNote] reste réservé au
+ * motif de refus (voir [coachRefuseRekoveryRequest]) et n'est donc jamais
+ * modifié par cette fonction.
+ */
+export const proposeRekoveryAlternative = onCall(
+  { region: REGION },
+  async (request) => {
+    await requireCoach(request.auth?.uid);
+
+    const { requestId, proposedDate, proposedStartTime } = request.data as {
+      requestId?: string;
+      proposedDate?: string;
+      proposedStartTime?: string;
+    };
+    if (!requestId || !proposedDate || !proposedStartTime) {
+      throw new HttpsError(
+        "invalid-argument",
+        "requestId, proposedDate et proposedStartTime requis."
+      );
+    }
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+    const reqData = reqSnap.data()!;
+    if (reqData.status !== "pending") {
+      throw new HttpsError("failed-precondition", "Cette demande n'est plus en attente.");
+    }
+
+    const proposedTimestamp = admin.firestore.Timestamp.fromDate(new Date(proposedDate));
+    await reqRef.update({
+      status: "proposed",
+      proposedDate: proposedTimestamp,
+      proposedStartTime,
+    });
+
+    const tokens = await getTokensForUids(
+      [reqData.adherentUid as string],
+      "rekoveryStatusChanged"
+    );
+    await sendPushToTokens(
+      tokens,
+      "Rekovery : autre créneau proposé",
+      `Le coach te propose ${formatDateAt(proposedTimestamp, proposedStartTime)} à la place.`
+    );
+
+    return { ok: true };
+  }
+);
+
+/**
+ * Adhérent : répond à une contre-proposition du coach ([proposed]).
+ * [accept] à `true` confirme le créneau proposé (décompte le carnet, comme
+ * une acceptation directe, sur la date/heure PROPOSÉES) ; à `false`, la
+ * demande est annulée d'office — pas de nouvelle contre-proposition
+ * possible.
+ */
+export const respondToRekoveryProposal = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
+
+    const { requestId, accept } = request.data as { requestId?: string; accept?: boolean };
+    if (!requestId || typeof accept !== "boolean") {
+      throw new HttpsError("invalid-argument", "requestId et accept requis.");
+    }
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+
+    const result = await db.runTransaction(async (tx) => {
+      const reqSnap = await tx.get(reqRef);
+      if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+      const reqData = reqSnap.data()!;
+      if (reqData.adherentUid !== uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Tu ne peux répondre qu'à tes propres demandes."
+        );
+      }
+      if (reqData.status !== "proposed") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Cette demande n'a pas (ou plus) de contre-proposition en attente."
+        );
+      }
+
+      if (!accept) {
+        tx.update(reqRef, { status: "cancelled" });
+        return { accepted: false as const };
+      }
+
+      const userRef = db.collection("users").doc(uid);
+      const userSnap = await tx.get(userRef);
+      const userData = userSnap.data();
+      const formulas = (userData?.formulas as string[] | undefined) ?? [];
+
+      if (isRekoverySoloOnly(formulas)) {
+        const remaining = (userData?.rekoveryCreditsRemaining as number | undefined) ?? 0;
+        if (remaining <= 0) {
+          throw new HttpsError("failed-precondition", "Ton carnet Rekovery est épuisé.");
+        }
+        tx.update(userRef, { rekoveryCreditsRemaining: remaining - 1 });
+      }
+
+      tx.update(reqRef, {
+        status: "accepted",
+        date: reqData.proposedDate,
+        startTime: reqData.proposedStartTime,
+        proposedDate: null,
+        proposedStartTime: null,
+      });
+
+      return {
+        accepted: true as const,
+        date: reqData.proposedDate as admin.firestore.Timestamp,
+        startTime: reqData.proposedStartTime as string,
+      };
+    });
+
+    if (result.accepted) {
+      const tokens = await getCoachTokens();
+      await sendPushToTokens(
+        tokens,
+        "Rekovery confirmé",
+        `La contre-proposition ${formatDateAt(result.date, result.startTime)} a été acceptée.`
+      );
+    }
+
+    return { ok: true };
+  }
+);
+
+/**
+ * Adhérent (sa propre demande) ou coach (n'importe laquelle) : annule une
+ * demande Rekovery, quel que soit son statut actuel (idempotent si déjà
+ * [cancelled]/[refused]). Si elle était [accepted] (crédit déjà décompté),
+ * le carnet de l'adhérent "Rekovery seul" est recrédité automatiquement.
+ */
+export const cancelRekoveryRequest = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
+
+    const { requestId } = request.data as { requestId?: string };
+    if (!requestId) throw new HttpsError("invalid-argument", "requestId requis.");
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+
+    await db.runTransaction(async (tx) => {
+      const reqSnap = await tx.get(reqRef);
+      if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+      const reqData = reqSnap.data()!;
+
+      const isOwner = reqData.adherentUid === uid;
+      let isCoach = false;
+      if (!isOwner) {
+        const callerSnap = await tx.get(db.collection("users").doc(uid));
+        const callerData = callerSnap.data();
+        isCoach = callerData?.role === "coach" && callerData?.status === "active";
+      }
+      if (!isOwner && !isCoach) {
+        throw new HttpsError(
+          "permission-denied",
+          "Tu ne peux annuler que tes propres demandes."
+        );
+      }
+      if (reqData.status === "cancelled" || reqData.status === "refused") {
+        return; // déjà dans un état final — rien à faire (idempotent).
+      }
+
+      // Une demande [accepted] avait décompté le carnet : on le recrédite
+      // si l'adhérent est "Rekovery seul".
+      if (reqData.status === "accepted") {
+        const userRef = db.collection("users").doc(reqData.adherentUid as string);
+        const userSnap = await tx.get(userRef);
+        const userData = userSnap.data();
+        const formulas = (userData?.formulas as string[] | undefined) ?? [];
+        if (isRekoverySoloOnly(formulas)) {
+          const remaining = (userData?.rekoveryCreditsRemaining as number | undefined) ?? 0;
+          tx.update(userRef, { rekoveryCreditsRemaining: remaining + 1 });
+        }
+      }
+
+      tx.update(reqRef, { status: "cancelled" });
+    });
+
+    return { ok: true };
+  }
+);
+
+/**
+ * Adhérent : modifie SA PROPRE demande (nouvelle date/heure) — action
+ * "Modifier" du menu à appui long (demande du 6 août 2026, voir
+ * `rekovery_request_actions_sheet.dart`). Autorisée quel que soit le statut
+ * de départ, sauf [refused]/[cancelled] (états finaux). La demande repasse
+ * systématiquement à [pending] : le coach doit de nouveau la valider,
+ * exactement comme une toute nouvelle demande.
+ *
+ * Si la demande était [accepted] (crédit déjà décompté), le carnet de
+ * l'adhérent "Rekovery seul" est recrédité automatiquement — même logique
+ * que [cancelRekoveryRequest].
+ */
+export const modifyRekoveryRequest = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
+
+    const { requestId, date, startTime } = request.data as {
+      requestId?: string;
+      date?: string;
+      startTime?: string;
+    };
+    if (!requestId || !date || !startTime) {
+      throw new HttpsError("invalid-argument", "requestId, date et startTime requis.");
+    }
+
+    const reqRef = db.collection("rekoveryRequests").doc(requestId);
+
+    const result = await db.runTransaction(async (tx) => {
+      const reqSnap = await tx.get(reqRef);
+      if (!reqSnap.exists) throw new HttpsError("not-found", "Demande introuvable.");
+      const reqData = reqSnap.data()!;
+      if (reqData.adherentUid !== uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Tu ne peux modifier que tes propres demandes."
+        );
+      }
+      if (reqData.status === "cancelled" || reqData.status === "refused") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Cette demande n'est plus modifiable."
+        );
+      }
+
+      // Une demande [accepted] avait décompté le carnet : on le recrédite
+      // si l'adhérent est "Rekovery seul", puisqu'elle repasse en attente.
+      if (reqData.status === "accepted") {
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await tx.get(userRef);
+        const userData = userSnap.data();
+        const formulas = (userData?.formulas as string[] | undefined) ?? [];
+        if (isRekoverySoloOnly(formulas)) {
+          const remaining = (userData?.rekoveryCreditsRemaining as number | undefined) ?? 0;
+          tx.update(userRef, { rekoveryCreditsRemaining: remaining + 1 });
+        }
+      }
+
+      const dateTimestamp = admin.firestore.Timestamp.fromDate(new Date(date));
+      tx.update(reqRef, {
+        status: "pending",
+        date: dateTimestamp,
+        startTime,
+        proposedDate: null,
+        proposedStartTime: null,
+        coachNote: null,
+      });
+
+      return {
+        adherentName: reqData.adherentName as string,
+        date: dateTimestamp,
+        startTime,
+      };
+    });
+
+    const tokens = await getCoachTokens();
+    await sendPushToTokens(
+      tokens,
+      "Demande Rekovery modifiée",
+      `${result.adherentName} a modifié sa demande : ${formatDateAt(result.date, result.startTime)}.`
+    );
+
+    return { ok: true };
   }
 );
 
@@ -663,11 +1186,26 @@ export const checkSingleRegistrantSlots = onSchedule(
           .get();
         const excludeUids = currentRegistrant.docs.map((d) => d.data().userId as string);
 
+        // Message à l'unique inscrit(e) lui/elle-même : le prévient qu'il/elle
+        // risque de se retrouver sans cours si personne ne le rejoint (26
+        // juillet 2026, demande de Margaux — jusqu'ici seuls les AUTRES
+        // adhérents étaient notifiés, jamais l'inscrit(e) lui/elle-même).
+        if (excludeUids.length > 0) {
+          const soloTokens = await getTokensForUids(excludeUids, "singleRegistrantAlert");
+          await sendPushToTokens(
+            soloTokens,
+            "Tu es seul.e",
+            `Tu es seul.e au ${slot.courseTitle} ${loneRegistrantClause(slot.date, slot.startTime)}.`
+          );
+        }
+
+        // Message aux autres adhérents de la même formule : invitation à
+        // rejoindre le cours pour qu'il ne soit pas annulé.
         const tokens = await getTokensForFormula(formula, excludeUids, "singleRegistrantAlert");
         await sendPushToTokens(
           tokens,
           "Un binôme te cherche.",
-          `${slot.courseTitle} ${formatSlotWhen(slot.date, slot.startTime)} n'a qu'un seul inscrit... Rejoins-le !`
+          `Le cours ${slot.courseTitle}, n'a qu'un seul inscrit. Rejoins-le!`
         );
         await doc.ref.update({ singleRegistrantAlertSent: true });
       } catch (err) {
@@ -726,7 +1264,7 @@ export const sendCourseReminders = onSchedule(
         await sendPushToTokens(
           tokens,
           "Rappel de cours",
-          `Tu es inscrit(e) à ${slot.courseTitle} ${formatSlotWhen(slot.date, slot.startTime)}.`
+          `Tu es inscrit.e ${registeredClause(slot.courseTitle, slot.date, slot.startTime)}.`
         );
         await doc.ref.update({ reminderSent: true });
       } catch (err) {
@@ -737,10 +1275,9 @@ export const sendCourseReminders = onSchedule(
 );
 
 /**
- * Toutes les 10 minutes, rappelle aux coachs 30 minutes avant une session
- * Rekovery enregistrée, pour qu'ils pensent à allumer le sauna avant
- * l'arrivée de l'adhérent. N'envoie qu'une seule fois par session
- * (`reminderSent`).
+ * Toutes les 10 minutes, rappelle aux coachs 30 minutes avant une demande
+ * Rekovery acceptée, pour qu'ils pensent à allumer le sauna avant l'arrivée
+ * de l'adhérent. N'envoie qu'une seule fois par demande (`reminderSent`).
  */
 export const sendRekoveryReminders = onSchedule(
   { schedule: "*/10 * * * *", region: REGION },
@@ -748,7 +1285,8 @@ export const sendRekoveryReminders = onSchedule(
     const REMINDER_MINUTES_BEFORE = 30;
     const { start, end } = scanWindow();
     const snap = await db
-      .collection("rekoverySessions")
+      .collection("rekoveryRequests")
+      .where("status", "==", "accepted")
       .where("date", ">=", start)
       .where("date", "<=", end)
       .get();
@@ -756,10 +1294,10 @@ export const sendRekoveryReminders = onSchedule(
     const now = Date.now();
 
     for (const doc of snap.docs) {
-      const session = doc.data();
-      if (session.reminderSent) continue;
+      const req = doc.data();
+      if (req.reminderSent) continue;
 
-      const startInstant = slotStartInstant(session.date, session.startTime);
+      const startInstant = slotStartInstant(req.date, req.startTime);
       const minutesUntilStart = (startInstant.getTime() - now) / (60 * 1000);
       if (minutesUntilStart <= 0 || minutesUntilStart > REMINDER_MINUTES_BEFORE) continue;
 
@@ -768,11 +1306,11 @@ export const sendRekoveryReminders = onSchedule(
         await sendPushToTokens(
           tokens,
           "Rekovery dans 30 min",
-          `${session.adherentName} arrive à ${(session.startTime as string).replace(":", "h")}. Allume le four !`
+          `${req.adherentName} arrive à ${(req.startTime as string).replace(":", "h")}. Allume le four !`
         );
         await doc.ref.update({ reminderSent: true });
       } catch (err) {
-        logger.error(`sendRekoveryReminders: échec pour la session ${doc.id}`, err);
+        logger.error(`sendRekoveryReminders: échec pour la demande ${doc.id}`, err);
       }
     }
   }
@@ -816,8 +1354,8 @@ async function affectedAdherentUids(slotId: string, slotData: admin.firestore.Do
  * l'inscription directe si une place était libre, ou après une promotion
  * depuis la liste d'attente) s'il a déjà une autre inscription confirmée le
  * même jour calendaire — pour repérer une erreur de double inscription
- * avant de manquer l'un des deux cours. Les sessions Rekovery ne comptent
- * jamais : elles vivent dans une collection à part (`rekoverySessions`),
+ * avant de manquer l'un des deux cours. Les demandes Rekovery ne comptent
+ * jamais : elles vivent dans une collection à part (`rekoveryRequests`),
  * jamais dans `registrations`.
  *
  * Un même jour calendaire correspond exactement à la même valeur du champ
@@ -857,7 +1395,7 @@ async function checkSameDayDoubleBooking(
     await sendPushToTokens(
       tokens,
       "Double inscription",
-      `Tu es inscrit(e) à ${otherSlotIds.size + 1} cours ${formatDayOnly(slotDate)}.`
+      `Tu es inscrit.e à ${otherSlotIds.size + 1} cours ${formatDayOnly(slotDate)}.`
     );
   } catch (err) {
     logger.error(`checkSameDayDoubleBooking: échec pour l'inscription ${registrationId}`, err);
@@ -936,7 +1474,7 @@ export const onSlotUpdated = onDocumentUpdated(
         await sendPushToTokens(
           tokens,
           "Ton cours a changé",
-          `${after.courseTitle} a été modifié : nouveau créneau ${formatSlotWhen(after.date, after.startTime)}.`
+          `Ta séance ${after.courseTitle} du ${formatDateAt(after.date, after.startTime)} a été modifiée.`
         );
       }
     } catch (err) {

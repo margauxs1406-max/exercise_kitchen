@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../models/closure_model.dart';
 import '../../models/registration_model.dart';
-import '../../models/rekovery_session_model.dart';
 import '../../models/slot_model.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
@@ -13,11 +12,8 @@ import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import '../../utils/slot_grouping.dart';
 import '../../utils/week_utils.dart';
-import '../../widgets/add_rekovery_dialog.dart';
 import '../../widgets/closure_banner.dart';
 import '../../widgets/day_header.dart';
-import '../../widgets/rekovery_actions_sheet.dart';
-import '../../widgets/rekovery_line.dart';
 import '../../widgets/slot_card.dart';
 import '../../widgets/slot_roster_dialog.dart';
 import '../../widgets/week_header.dart';
@@ -33,9 +29,8 @@ import 'adherent_profile_screen.dart';
 /// souscrites par l'adhérent (cochées par un coach depuis sa fiche) —
 /// [_visibleForUser] filtre côté client, puisque Firestore ne permet pas
 /// facilement ce genre de filtre "un champ du user courant contre le type
-/// du document" en une seule requête. Un adhérent avec la formule
-/// "Rekovery" voit en plus un bouton flottant qui ouvre
-/// [showAddRekoveryDialog] pour indiquer sa date/heure d'arrivée.
+/// du document" en une seule requête. Rekovery n'apparaît plus ici : c'est
+/// désormais un onglet dédié (voir `adherent_rekovery_screen.dart`).
 ///
 /// Possède son propre [Scaffold]/en-tête ([WeekHeader]), au même titre que
 /// `ManagePlanningScreen` côté coach — voir `adherent_home_screen.dart`.
@@ -207,16 +202,6 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                       stream: planningRepo.watchClosuresForWeek(_weekStart),
                       builder: (context, closuresSnapshot) {
                         final closures = closuresSnapshot.data ?? const <ClosureModel>[];
-                        return StreamBuilder<List<RekoverySessionModel>>(
-                          // Un adhérent ne voit que ses propres sessions
-                          // rekovery (voir `firestore.rules`).
-                          stream: planningRepo.watchRekoveryForWeek(
-                            _weekStart,
-                            onlyAdherentUid: uid,
-                          ),
-                          builder: (context, rekoverySnapshot) {
-                            final rekoverySessions =
-                                rekoverySnapshot.data ?? const <RekoverySessionModel>[];
 
                             // Un jour entièrement passé disparaît du planning,
                             // MAIS uniquement pour la semaine en cours (celle
@@ -231,9 +216,9 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                             //
                             // Dès qu'on navigue vers une semaine ENTIÈREMENT
                             // passée (flèche précédente), plus aucun filtre :
-                            // l'historique complet des duos, individuels et
-                            // sessions rekovery redevient visible, pour
-                            // pouvoir le consulter après coup.
+                            // l'historique complet des duos et individuels
+                            // redevient visible, pour pouvoir le consulter
+                            // après coup.
                             final today = _dayOf(DateTime.now());
                             final isPastWeek = _dayOf(_weekStart)
                                 .add(const Duration(days: 6))
@@ -262,15 +247,8 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                                 : closures
                                     .where((c) => !_dayOf(c.endDate).isBefore(today))
                                     .toList();
-                            final visibleRekoverySessions = isPastWeek
-                                ? rekoverySessions
-                                : rekoverySessions
-                                    .where((r) => !_dayOf(r.date).isBefore(today))
-                                    .toList();
 
-                            if (visibleSlots.isEmpty &&
-                                visibleClosures.isEmpty &&
-                                visibleRekoverySessions.isEmpty) {
+                            if (visibleSlots.isEmpty && visibleClosures.isEmpty) {
                               return const Center(
                                 child: Text('Aucun créneau cette semaine.'),
                               );
@@ -279,7 +257,6 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                             final items = groupSlotsByDay(
                               visibleSlots,
                               closures: visibleClosures,
-                              rekoverySessions: visibleRekoverySessions,
                             );
                             return ListView.builder(
                               padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
@@ -291,23 +268,6 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                                 }
                                 if (item is ClosureModel) {
                                   return ClosureBanner(closure: item);
-                                }
-                                if (item is RekoverySessionModel) {
-                                  // `showName` reste false : l'adhérent ne
-                                  // voit que ses propres sessions. `color`
-                                  // en orange (au lieu du gris par défaut,
-                                  // gardé côté coach) pour que sa session
-                                  // ressorte davantage dans son planning.
-                                  // `onTap` ouvre "Modifier"/"Supprimer"
-                                  // (section 2.4bis) — chaque session vue ici
-                                  // appartient forcément à l'adhérent courant
-                                  // (voir `watchRekoveryForWeek(onlyAdherentUid:
-                                  // uid)` plus haut).
-                                  return RekoveryLine(
-                                    session: item,
-                                    color: AppColors.orange,
-                                    onTap: () => showRekoveryActionsSheet(context, item),
-                                  );
                                 }
                                 final slot = item as SlotModel;
                                 // Individuel / workshop : pas d'inscription
@@ -387,46 +347,11 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                       },
                     );
                   },
-                );
-              },
-            ),
+                ),
             ),
           ),
         ],
       ),
-      // Section 2.4bis : uniquement pour les adhérents ayant la formule
-      // "Rekovery" — ouvre la pop-up [showAddRekoveryDialog] (date pré-remplie
-      // sur aujourd'hui, heure à choisir), pour que les coachs puissent
-      // anticiper (ex. allumer le sauna avant l'arrivée).
-      floatingActionButton: (user == null || !user.formulas.contains('rekovery'))
-          ? null
-          : Padding(
-              padding: EdgeInsets.only(right: context.wp(20), bottom: context.hp(24)),
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.black.withValues(alpha: 0.24),
-                      offset: const Offset(6, 3),
-                      blurRadius: 12,
-                    ),
-                  ],
-                ),
-                child: FloatingActionButton(
-                  backgroundColor: AppColors.black,
-                  elevation: 0,
-                  highlightElevation: 0,
-                  shape: const CircleBorder(),
-                  onPressed: () => showAddRekoveryDialog(
-                    context,
-                    adherentUid: user.uid,
-                    adherentName: user.shortName,
-                  ),
-                  child: Icon(Icons.thermostat, color: AppColors.white, size: context.wp(28)),
-                ),
-              ),
-            ),
     );
   }
 }

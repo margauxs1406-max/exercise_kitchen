@@ -10,7 +10,7 @@ class DefaultCollectiveSlot {
   const DefaultCollectiveSlot(this.dayOfWeek, this.startTime);
 }
 
-const int kDefaultCollectiveCapacity = 6;
+const int kDefaultCollectiveCapacity = 8;
 
 const List<DefaultCollectiveSlot> kDefaultCollectiveSchedule = [
   DefaultCollectiveSlot(1, '12:00'), // Lundi 12h
