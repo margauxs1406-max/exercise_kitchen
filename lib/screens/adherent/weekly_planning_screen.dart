@@ -128,6 +128,48 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
     }
   }
 
+  /// Pop-up de confirmation avant désinscription (12 août 2026, demande de
+  /// Margaux) : jusqu'ici, un simple tap sur le libellé "Inscrit.e"/"En
+  /// attente" désinscrivait IMMÉDIATEMENT, sans confirmation — trop
+  /// dangereux (désinscription accidentelle facile). Un tap simple sur ce
+  /// libellé (comme sur le reste de la carte) ouvre désormais la pop-up
+  /// "inscrits/liste d'attente" (voir [SlotCard.onTap] plus bas) ; seul un
+  /// appui LONG sur la carte déclenche cette confirmation, même style que
+  /// [_confirmAndDelete] (`slot_actions_sheet.dart`, côté coach) pour rester
+  /// cohérent avec le reste de l'app.
+  Future<void> _confirmUnregister({
+    required RegistrationRepository regRepo,
+    required SlotModel slot,
+    required RegistrationModel myRegistration,
+  }) async {
+    final isWaitlisted = myRegistration.status == RegistrationStatus.waitlisted;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.white,
+        surfaceTintColor: Colors.transparent,
+        title: const Text('SE DÉSINSCRIRE ?'),
+        content: Text(
+          isWaitlisted
+              ? 'Tu quitteras la liste d\'attente de « ${slot.courseTitle} » '
+                  '(${slot.startTime}–${slot.endTime}).'
+              : 'Ta place pour « ${slot.courseTitle} » (${slot.startTime}–${slot.endTime}) '
+                  'sera libérée.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Se désinscrire'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _toggleRegistration(regRepo: regRepo, slot: slot, myRegistration: myRegistration);
+  }
+
   @override
   Widget build(BuildContext context) {
     final planningRepo = context.read<PlanningRepository>();
@@ -323,10 +365,36 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                                   // ici aussi aux collectifs et duos — un
                                   // individuel n'a qu'un seul adhérent
                                   // concerné (lui-même) et un workshop n'a
-                                  // pas d'inscription.
+                                  // pas d'inscription. Un tap simple ouvre
+                                  // TOUJOURS cette pop-up (12 août 2026, y
+                                  // compris en tapant sur le libellé
+                                  // "Inscrit.e"/"En attente" lui-même — voir
+                                  // `_RegistrationButton` plus bas, qui ne
+                                  // capte plus le tap dans ce cas).
                                   onTap: isRegisterable
                                       ? () => showSlotRosterDialog(context, slot)
                                       : null,
+                                  // Appui long : demande de confirmation
+                                  // avant désinscription (12 août 2026,
+                                  // demande de Margaux — remplace l'ancienne
+                                  // désinscription immédiate au tap simple,
+                                  // trop facile à déclencher par accident).
+                                  // Même condition que l'ancien bouton
+                                  // "Inscrit.e"/"En attente" cliquable qu'il
+                                  // remplace : il faut à la fois une
+                                  // inscription à annuler (`myReg != null`)
+                                  // ET que le créneau soit encore dans la
+                                  // fenêtre où une action d'inscription a
+                                  // seulement du sens (`showRegisterButton`
+                                  // — pas un créneau déjà passé, ni au-delà
+                                  // des 2 semaines glissantes ouvertes).
+                                  onLongPress: (myReg == null || !showRegisterButton)
+                                      ? null
+                                      : () => _confirmUnregister(
+                                            regRepo: regRepo,
+                                            slot: slot,
+                                            myRegistration: myReg,
+                                          ),
                                   trailing: !showRegisterButton
                                       ? null
                                       : SizedBox(
@@ -544,27 +612,28 @@ class _RegistrationButton extends StatelessWidget {
       final icon = isWaitlisted ? Icons.hourglass_empty : Icons.check_circle;
       final label = isWaitlisted ? 'En attente' : 'Inscrit.e';
 
-      // Plus de contour ni de fond de bouton une fois inscrit / en attente :
-      // juste le texte et l'icône (à droite du texte), dans la couleur
-      // d'état correspondante. `onPressed` reste actif (permet toujours
-      // d'annuler l'inscription).
-      return InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(context.wp(20)),
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: context.hp(6), horizontal: context.wp(4)),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: context.sp(12)),
-              ),
-              SizedBox(width: context.wp(4)),
-              Icon(icon, color: color, size: context.wp(20)),
-            ],
-          ),
+      // Plus de tap dédié ici depuis le 12 août 2026 (demande de Margaux —
+      // avant, taper ce libellé désinscrivait IMMÉDIATEMENT, sans
+      // confirmation : trop dangereux). `onPressed` n'est donc plus branché
+      // sur ce libellé : un simple `Padding` (pas d'`InkWell`) laisse le tap
+      // remonter jusqu'à la carte elle-même, qui ouvre la pop-up
+      // "inscrits/liste d'attente" comme partout ailleurs sur la carte (voir
+      // `SlotCard.onTap`) — la désinscription se fait maintenant par appui
+      // long SUR LA CARTE, avec confirmation (voir
+      // `_WeeklyPlanningScreenState._confirmUnregister`).
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: context.hp(6), horizontal: context.wp(4)),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: context.sp(12)),
+            ),
+            SizedBox(width: context.wp(4)),
+            Icon(icon, color: color, size: context.wp(20)),
+          ],
         ),
       );
     }
