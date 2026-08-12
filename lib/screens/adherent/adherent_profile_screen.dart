@@ -89,6 +89,34 @@ class _ProfileBody extends StatelessWidget {
     }
   }
 
+  /// Section (profil adhérent, 7 août 2026) : contrairement au mot de passe
+  /// (que Firebase ne renvoie jamais, donc uniquement remplaçable), le nom
+  /// est une donnée ordinaire — la pop-up ci-dessous est pré-remplie avec
+  /// les valeurs actuelles plutôt que de repartir de champs vides.
+  Future<void> _showEditNameDialog(BuildContext context) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _EditNameDialog(repo: repo, user: user),
+    );
+    if (changed == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nom modifié.')),
+      );
+    }
+  }
+
+  Future<void> _showEditPhoneDialog(BuildContext context) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _EditPhoneDialog(repo: repo, user: user),
+    );
+    if (changed == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Numéro de téléphone modifié.')),
+      );
+    }
+  }
+
   /// Avant d'activer le switch, on vérifie que l'appareil supporte bien la
   /// biométrie ET qu'une authentification réussit réellement — sinon on
   /// n'active jamais le réglage, pour ne pas risquer de verrouiller
@@ -142,17 +170,65 @@ class _ProfileBody extends StatelessWidget {
               children: [
                 Text('Données personnelles', style: Theme.of(context).textTheme.titleMedium),
                 SizedBox(height: context.hp(12)),
-                _InfoLine(icon: Icons.person_outline, label: user.fullName),
-                SizedBox(height: context.hp(10)),
-                _InfoLine(icon: Icons.email_outlined, label: user.email),
-                SizedBox(height: context.hp(10)),
-                _InfoLine(
-                  icon: Icons.phone_outlined,
-                  label: (user.phone == null || user.phone!.isEmpty)
-                      ? 'Téléphone non renseigné'
-                      : user.phone!,
+                // Nom et téléphone modifiables (7 août 2026, à la demande de
+                // Margaux) — même style "Modifier" en orange souligné que le
+                // mot de passe ci-dessous. L'email reste en lecture seule
+                // (non demandé, et plus sensible à changer : lié à
+                // l'authentification Firebase elle-même).
+                Row(
+                  children: [
+                    Icon(Icons.person_outline, size: _kIconSize(context), color: AppColors.orange),
+                    SizedBox(width: context.wp(8)),
+                    Expanded(
+                      child:
+                          Text(user.fullName, style: TextStyle(fontSize: _kTextSize(context))),
+                    ),
+                    TextButton(
+                      onPressed: () => _showEditNameDialog(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.orange,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const _UnderlinedOrangeText('Modifier'),
+                    ),
+                  ],
                 ),
-                SizedBox(height: context.hp(10)),
+                // Espacement entre les lignes "Données personnelles"
+                // augmenté de 2px (9 août 2026, demande de Margaux) : 10 → 12.
+                SizedBox(height: context.hp(12)),
+                _InfoLine(icon: Icons.email_outlined, label: user.email),
+                // Espacement entre les lignes "Données personnelles"
+                // augmenté de 2px (9 août 2026, demande de Margaux) : 10 → 12.
+                SizedBox(height: context.hp(12)),
+                Row(
+                  children: [
+                    Icon(Icons.phone_outlined, size: _kIconSize(context), color: AppColors.orange),
+                    SizedBox(width: context.wp(8)),
+                    Expanded(
+                      child: Text(
+                        (user.phone == null || user.phone!.isEmpty)
+                            ? 'Téléphone non renseigné'
+                            : user.phone!,
+                        style: TextStyle(fontSize: _kTextSize(context)),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _showEditPhoneDialog(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.orange,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const _UnderlinedOrangeText('Modifier'),
+                    ),
+                  ],
+                ),
+                // Espacement entre les lignes "Données personnelles"
+                // augmenté de 2px (9 août 2026, demande de Margaux) : 10 → 12.
+                SizedBox(height: context.hp(12)),
                 Row(
                   children: [
                     Icon(Icons.lock_outline, size: _kIconSize(context), color: AppColors.orange),
@@ -403,6 +479,180 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             ],
           ],
         ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? SizedBox(
+                  height: context.hp(18),
+                  width: context.wp(18),
+                  child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('Valider'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pop-up de modification du prénom/nom (profil adhérent, 7 août 2026) —
+/// pré-remplie avec les valeurs actuelles (contrairement au mot de passe,
+/// qui repart toujours de champs vides).
+class _EditNameDialog extends StatefulWidget {
+  final UserRepository repo;
+  final UserModel user;
+  const _EditNameDialog({required this.repo, required this.user});
+
+  @override
+  State<_EditNameDialog> createState() => _EditNameDialogState();
+}
+
+class _EditNameDialogState extends State<_EditNameDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _firstNameController = TextEditingController(text: widget.user.firstName);
+  late final _lastNameController = TextEditingController(text: widget.user.lastName);
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.repo.updateName(
+        widget.user.uid,
+        firstName: _firstNameController.text.trim(),
+        lastName: _lastNameController.text.trim(),
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      setState(() => _error = 'Impossible de modifier le nom, réessaie.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.white,
+      surfaceTintColor: Colors.transparent,
+      title: Text('Modifier le nom'.toUpperCase()),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _firstNameController,
+              decoration: const InputDecoration(labelText: 'Prénom'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Requis' : null,
+            ),
+            SizedBox(height: context.hp(12)),
+            TextFormField(
+              controller: _lastNameController,
+              decoration: const InputDecoration(labelText: 'Nom'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Requis' : null,
+            ),
+            if (_error != null) ...[
+              SizedBox(height: context.hp(12)),
+              Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? SizedBox(
+                  height: context.hp(18),
+                  width: context.wp(18),
+                  child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('Valider'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pop-up de modification du numéro de téléphone (profil adhérent, 7 août
+/// 2026) — champ optionnel : un champ laissé vide efface le numéro (repasse
+/// à "Téléphone non renseigné", voir `UserRepository.updatePhone`).
+class _EditPhoneDialog extends StatefulWidget {
+  final UserRepository repo;
+  final UserModel user;
+  const _EditPhoneDialog({required this.repo, required this.user});
+
+  @override
+  State<_EditPhoneDialog> createState() => _EditPhoneDialogState();
+}
+
+class _EditPhoneDialogState extends State<_EditPhoneDialog> {
+  late final _phoneController = TextEditingController(text: widget.user.phone ?? '');
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final text = _phoneController.text.trim();
+      await widget.repo.updatePhone(widget.user.uid, text.isEmpty ? null : text);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      setState(() => _error = 'Impossible de modifier le numéro, réessaie.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.white,
+      surfaceTintColor: Colors.transparent,
+      title: Text('Modifier le numéro'.toUpperCase()),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextFormField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(labelText: 'Numéro de téléphone'),
+          ),
+          if (_error != null) ...[
+            SizedBox(height: context.hp(12)),
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+          ],
+        ],
       ),
       actions: [
         TextButton(

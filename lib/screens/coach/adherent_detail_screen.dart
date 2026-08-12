@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/user_model.dart';
@@ -310,7 +311,16 @@ class _AdherentDetailBody extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.orange),
                   ),
-                  icon: const Icon(Icons.thermostat),
+                  // Icône Rekovery : SVG dédié (7 août 2026, remplace
+                  // l'icône Material `Icons.thermostat`) — voir aussi
+                  // `rekovery_request_card.dart`/`adherent_rekovery_history_screen.dart`/
+                  // `adherent_rekovery_screen.dart`, mêmes emplacements.
+                  icon: SvgPicture.asset(
+                    'assets/thermometer.svg',
+                    width: context.wp(18),
+                    height: context.wp(18),
+                    colorFilter: const ColorFilter.mode(AppColors.orange, BlendMode.srcIn),
+                  ),
                   label: const Text("Voir l'historique des séances"),
                 ),
               ],

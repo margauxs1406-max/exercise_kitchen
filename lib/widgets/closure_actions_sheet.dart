@@ -19,7 +19,7 @@ Future<void> showClosureActionsSheet(BuildContext context, ClosureModel closure)
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
+          ListTile( 
             leading: const Icon(Icons.edit, color: AppColors.black),
             title: const Text('Modifier la période/le message'),
             onTap: () => Navigator.of(context).pop(_ClosureAction.edit),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/auth_service.dart';
+import '../../widgets/rekovery_nav_icon.dart';
 import 'adherent_rekovery_screen.dart';
 import 'progress_gallery_screen.dart';
 import 'weekly_planning_screen.dart';
@@ -71,7 +72,7 @@ class _AdherentHomeScreenState extends State<AdherentHomeScreen> {
           const NavigationDestination(icon: Icon(Icons.photo_library), label: 'Photos'),
           const NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
           if (hasRekovery)
-            const NavigationDestination(icon: Icon(Icons.thermostat), label: 'Rekovery'),
+            NavigationDestination(icon: const RekoveryNavIcon(), label: 'Rekovery'),
         ],
       ),
     );

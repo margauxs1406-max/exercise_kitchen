@@ -89,7 +89,13 @@ class PlanningRepository {
   /// Coach : ajoute un cours duo ponctuel directement au planning d'une
   /// semaine donnée (section 1.3), en plus des créneaux collectifs fixes.
   /// Titre imposé à "Duo" et durée fixe d'1h (pas de saisie côté coach).
-  Future<void> addDuoSlotForWeek({
+  ///
+  /// Renvoie l'identifiant du créneau créé (7 août 2026) — nécessaire pour
+  /// pouvoir y inscrire immédiatement les 2 adhérents prérenseignés, voir
+  /// `add_course_screen.dart` et `RegistrationRepository.coachRegisterAdherentForSlot`.
+  /// Auparavant la référence renvoyée par `_slots.add` était ignorée : il
+  /// n'existait alors aucun moyen d'inscrire quelqu'un juste après création.
+  Future<String> addDuoSlotForWeek({
     required DateTime date,
     required String startTime,
     int capacity = 2,
@@ -106,7 +112,8 @@ class PlanningRepository {
       registeredCount: 0,
       waitlistCount: 0,
     );
-    await _slots.add(slot.toFirestore());
+    final ref = await _slots.add(slot.toFirestore());
+    return ref.id;
   }
 
   /// Garantit que les créneaux collectifs fixes (voir
@@ -222,6 +229,24 @@ class PlanningRepository {
   /// (et non l'identifiant du document) : plus fiable pour une comparaison
   /// `>`/`<` côté Firestore, et cohérent avec le reste du dépôt (`slots`,
   /// `closures`...) qui filtre toujours sur un vrai champ `date`.
+  ///
+  /// Correctif du 7 août 2026 (bug signalé par Margaux : après "Dynamique
+  /// 2/2", le planning affichait "Basique 2/2" au lieu de "Basique 1/2",
+  /// soit un cycle qui avait sauté un pas). **Cause** : la version
+  /// précédente recalculait le type de chaque semaine suivante en chaînant
+  /// [_nextWeekType] pas à pas sur les documents renvoyés par la requête
+  /// (`prevType = _nextWeekType(prevType)` une fois par document parcouru)
+  /// — une hypothèse implicite que chaque document de la liste correspond à
+  /// EXACTEMENT une semaine de plus que le précédent. Si un seul document
+  /// s'écarte de cette hypothèse (semaine dupliquée, document orphelin d'un
+  /// ancien format sans `weekStart` fiable, trou dans la séquence...), tout
+  /// le reste de la chaîne se décale d'un pas, indéfiniment. **Correctif** :
+  /// chaque semaine suivante reçoit désormais son type calculé directement
+  /// depuis son ÉCART EN NOMBRE DE SEMAINES réel par rapport à [weekStart]
+  /// (`_weekTypeAtOffset`), plutôt que par un chaînage pas-à-pas — un
+  /// document en trop, dupliqué ou mal daté n'a alors aucune influence sur
+  /// les autres, chacun étant recalculé indépendamment à partir de sa propre
+  /// date.
   Future<void> setWeekType(DateTime weekStart, String type) async {
     final weekStartId = _weekTypeDocId(weekStart);
     final batch = _firestore.batch();
@@ -234,17 +259,17 @@ class PlanningRepository {
         .where('weekStart', isGreaterThan: Timestamp.fromDate(weekStart))
         .orderBy('weekStart')
         .get();
-    var prevType = type;
     for (final doc in laterSnap.docs) {
-      prevType = _nextWeekType(prevType);
-      // Réécrit aussi `weekStart` (recalculé depuis l'id si absent — semaine
-      // matérialisée avant l'introduction de ce champ) : comble
-      // rétroactivement le champ manquant plutôt que de laisser ce document
-      // devenir invisible aux prochaines requêtes par plage.
-      final existingWeekStart = doc.data()['weekStart'] as Timestamp?;
+      // Recalculé depuis l'id si absent — semaine matérialisée avant
+      // l'introduction de ce champ ; comble rétroactivement le champ
+      // manquant plutôt que de laisser ce document devenir invisible aux
+      // prochaines requêtes par plage.
+      final docWeekStart =
+          (doc.data()['weekStart'] as Timestamp?)?.toDate() ?? _weekTypeIdToDate(doc.id);
+      final weeksOffset = docWeekStart.difference(weekStart).inDays ~/ 7;
       batch.set(doc.reference, {
-        'type': prevType,
-        'weekStart': existingWeekStart ?? Timestamp.fromDate(_weekTypeIdToDate(doc.id)),
+        'type': _weekTypeAtOffset(type, weeksOffset),
+        'weekStart': Timestamp.fromDate(docWeekStart),
       });
     }
     await batch.commit();

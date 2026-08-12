@@ -25,8 +25,8 @@ class PrivacyPolicyScreen extends StatelessWidget {
             _Section(
               title: 'Finalités du traitement',
               body:
-                  'Gestion du planning des cours, suivi de ta progression '
-                  '(photos) et suivi de ton hydratation.',
+                  'Gestion du planning des cours et suivi de ta progression '
+                  '(photos).',
             ),
             _Section(
               title: 'Données collectées',
@@ -34,7 +34,6 @@ class PrivacyPolicyScreen extends StatelessWidget {
                   '• Identité et contact (nom, prénom, email)\n'
                   '• Photos de progression (face, dos, profils) — visibles '
                   'uniquement par toi et les coachs\n'
-                  '• Réponses au questionnaire d\'hydratation et score calculé\n'
                   '• Historique de tes inscriptions aux cours',
             ),
             _Section(

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/rekovery_nav_icon.dart';
 import '../../widgets/week_header.dart';
 import 'coach_rekovery_screen.dart';
 import 'create_adherent_screen.dart';
@@ -52,10 +53,10 @@ class _CoachHomeScreenState extends State<CoachHomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.people), label: 'Adhérents'),
-          NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
-          NavigationDestination(icon: Icon(Icons.thermostat), label: 'Rekovery'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.people), label: 'Adhérents'),
+          const NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
+          const NavigationDestination(icon: RekoveryNavIcon(), label: 'Rekovery'),
         ],
       ),
     );

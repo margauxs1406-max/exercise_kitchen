@@ -58,10 +58,22 @@ class RekoveryRepository {
   /// N'échoue PAS si le carnet est déjà à 0 — voir
   /// `functions/src/index.ts` (`requestRekoverySlot`) : le crédit n'est
   /// vérifié/décompté qu'à l'acceptation par le coach, pas à la demande.
+  ///
+  /// `.toUtc()` avant `.toIso8601String()` (10 août 2026, corrige un bug de
+  /// décalage de 11h signalé par Margaux — Nouméa est UTC+11) : [date] est
+  /// une `DateTime` LOCALE (minuit du jour choisi, fuseau de l'appareil,
+  /// donc Nouméa) — `toIso8601String()` sur une `DateTime` locale n'inclut
+  /// AUCUN indicateur de fuseau (pas de "Z", pas de "+11:00"), contrairement
+  /// à son équivalent JavaScript. Côté Cloud Functions, `new Date(...)` sur
+  /// une telle chaîne SANS fuseau est interprétée comme un instant UTC
+  /// (l'environnement d'exécution tourne en UTC) — l'heure demandée se
+  /// retrouvait donc décalée de 11h. `.toUtc()` convertit d'abord en le bon
+  /// instant absolu ; la chaîne obtenue se termine par "Z" et est alors
+  /// interprétée sans ambiguïté, quel que soit le fuseau du serveur.
   Future<void> requestSlot({required DateTime date, required String startTime}) {
     final callable = _functions.httpsCallable('requestRekoverySlot');
     return callable.call<void>({
-      'date': date.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
       'startTime': startTime,
     });
   }
@@ -85,6 +97,8 @@ class RekoveryRepository {
   /// de l'adhérent (voir [respondToProposal]). Pas de message libre pour le
   /// coach ici (retiré le 6 août 2026) — seul [refuseRequest] garde un motif
   /// facultatif.
+  ///
+  /// `.toUtc()` : voir [requestSlot], même correctif du 10 août 2026.
   Future<void> proposeAlternative(
     String requestId, {
     required DateTime proposedDate,
@@ -93,7 +107,7 @@ class RekoveryRepository {
     final callable = _functions.httpsCallable('proposeRekoveryAlternative');
     return callable.call<void>({
       'requestId': requestId,
-      'proposedDate': proposedDate.toIso8601String(),
+      'proposedDate': proposedDate.toUtc().toIso8601String(),
       'proposedStartTime': proposedStartTime,
     });
   }
@@ -122,6 +136,8 @@ class RekoveryRepository {
   /// du 6 août 2026, action "Modifier" du menu à appui long). Si elle était
   /// [accepted] (crédit déjà décompté), le carnet est recrédité
   /// automatiquement côté serveur, comme pour [cancelRequest].
+  ///
+  /// `.toUtc()` : voir [requestSlot], même correctif du 10 août 2026.
   Future<void> modifyRequest(
     String requestId, {
     required DateTime date,
@@ -130,7 +146,7 @@ class RekoveryRepository {
     final callable = _functions.httpsCallable('modifyRekoveryRequest');
     return callable.call<void>({
       'requestId': requestId,
-      'date': date.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
       'startTime': startTime,
     });
   }

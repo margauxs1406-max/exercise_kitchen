@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 
 import '../models/rekovery_request_model.dart';
@@ -33,6 +34,24 @@ String _fmtDateTime(DateTime date, String startTime) {
   }
 }
 
+/// Fond de carte + couleurs d'avatar pour une demande Rekovery "active"
+/// (10 août 2026, demande de Margaux — même principe que
+/// [SlotCardColorMode.byRegistrationStatus] dans `slot_card.dart`) :
+/// `accepted` (équivalent "Inscrit") → vert, `pending`/`proposed`
+/// (équivalent "En attente") → moutarde. `null` pour `refused`/`cancelled`
+/// : ces statuts gardent les couleurs neutres (comportement inchangé).
+(Color, Color, Color)? _activeColors(RekoveryRequestStatus status) => switch (status) {
+      // Couleurs claires EXACTES fournies par Margaux le 10 août 2026 (pas
+      // de calcul via `withValues(alpha:...)`, voir `AppColors.lightGreen`/
+      // `lightMustard`).
+      RekoveryRequestStatus.accepted =>
+        (AppColors.lightGreen, AppColors.white, AppColors.flashyGreen),
+      RekoveryRequestStatus.pending ||
+      RekoveryRequestStatus.proposed =>
+        (AppColors.lightMustard, AppColors.white, AppColors.mustardYellow),
+      RekoveryRequestStatus.refused || RekoveryRequestStatus.cancelled => null,
+    };
+
 /// Carte d'affichage d'une demande Rekovery, utilisée par les écrans coach
 /// et adhérent (même rôle que [SlotCard] pour un cours). [showName] affiche
 /// le nom de l'adhérent en titre.
@@ -44,6 +63,15 @@ String _fmtDateTime(DateTime date, String startTime) {
 /// par les autres (utile pour choisir un créneau tranquille), avec leur nom,
 /// mais seul le statut de l'utilisateur courant reste en couleur.
 ///
+/// [colorByStatus] (10 août 2026, `false` par défaut — comportement
+/// inchangé côté coach) : quand `true` ET [isOwn] (l'écran adhérent le
+/// passe à `true` pour toutes les cartes, mais seules SES PROPRES demandes
+/// en profitent réellement), le fond de la carte et l'avatar reprennent les
+/// mêmes couleurs que les créneaux du planning ([SlotCard]) — vert clair si
+/// `accepted`, moutarde clair si `pending`/`proposed`. Les demandes des
+/// autres adhérents, ou un statut `refused`/`cancelled`, restent en
+/// couleurs neutres.
+///
 /// Un appui simple (tap) ne fait rien : seul un appui long ([onLongPress])
 /// ouvre les actions disponibles pour ce statut et ce rôle — voir
 /// `rekovery_request_actions_sheet.dart` (adhérent) et
@@ -53,6 +81,7 @@ class RekoveryRequestCard extends StatelessWidget {
   final RekoveryRequestModel request;
   final bool showName;
   final bool isOwn;
+  final bool colorByStatus;
   final VoidCallback? onLongPress;
 
   const RekoveryRequestCard({
@@ -60,6 +89,7 @@ class RekoveryRequestCard extends StatelessWidget {
     required this.request,
     this.showName = false,
     this.isOwn = true,
+    this.colorByStatus = false,
     this.onLongPress,
   });
 
@@ -67,6 +97,10 @@ class RekoveryRequestCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final (statusLabel, badgeColor, statusIcon) = _statusBadge(request.status);
     final statusColor = isOwn ? badgeColor : AppColors.mediumGrey;
+    final activeColors = (colorByStatus && isOwn) ? _activeColors(request.status) : null;
+    final cardBackground = activeColors?.$1 ?? AppColors.white;
+    final avatarBackground = activeColors?.$2 ?? AppColors.lightGrey;
+    final avatarIconColor = activeColors?.$3 ?? AppColors.black;
 
     final subtitleLines = <Widget>[
       Text(_fmtDateTime(request.date, request.startTime)),
@@ -94,12 +128,21 @@ class RekoveryRequestCard extends StatelessWidget {
     }
 
     return Card(
-      color: AppColors.white,
+      color: cardBackground,
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: AppColors.lightGrey,
-          foregroundColor: AppColors.black,
-          child: const Icon(Icons.thermostat),
+          backgroundColor: avatarBackground,
+          foregroundColor: avatarIconColor,
+          // Icône Rekovery : SVG dédié (7 août 2026, remplace l'icône
+          // Material `Icons.thermostat`) — `CircleAvatar.foregroundColor`
+          // ne teinte pas automatiquement un SVG (contrairement à un
+          // `Icon`), d'où le `colorFilter` explicite ci-dessous.
+          child: SvgPicture.asset(
+            'assets/thermometer.svg',
+            width: context.wp(20),
+            height: context.wp(20),
+            colorFilter: ColorFilter.mode(avatarIconColor, BlendMode.srcIn),
+          ),
         ),
         title: Text(showName ? request.adherentName : 'Rekovery'),
         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: subtitleLines),

@@ -7,6 +7,7 @@ import '../services/planning_repository.dart';
 import '../services/rekovery_repository.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/adaptive_pickers.dart';
 import '../utils/week_utils.dart';
 import 'picker_tile.dart';
 
@@ -260,7 +261,7 @@ class _ModifyRequestDialogState extends State<_ModifyRequestDialog> {
     final today = _dayOf(DateTime.now());
     final lastDay = _lastSelectableDay;
     final initial = _date.isBefore(today) || _date.isAfter(lastDay) ? today : _date;
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: initial,
       firstDate: today,
@@ -271,7 +272,7 @@ class _ModifyRequestDialogState extends State<_ModifyRequestDialog> {
   }
 
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _time);
+    final picked = await showAdaptiveTimePicker(context: context, initialTime: _time);
     if (picked == null) return;
     if (!_isWithinAllowedWindow(picked)) {
       if (mounted) {

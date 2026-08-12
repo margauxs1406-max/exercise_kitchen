@@ -3,11 +3,13 @@ import 'package:provider/provider.dart';
 
 import '../../models/closure_model.dart';
 import '../../models/registration_model.dart';
+import '../../models/rekovery_request_model.dart';
 import '../../models/slot_model.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/planning_repository.dart';
 import '../../services/registration_repository.dart';
+import '../../services/rekovery_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import '../../utils/slot_grouping.dart';
@@ -18,6 +20,7 @@ import '../../widgets/slot_card.dart';
 import '../../widgets/slot_roster_dialog.dart';
 import '../../widgets/week_header.dart';
 import '../../widgets/week_nav_bar.dart';
+import '../../widgets/week_recap_row.dart';
 import 'adherent_profile_screen.dart';
 
 /// Section 2.2 / 2.2bis / 2.2ter : planning de la semaine avec inscription
@@ -157,6 +160,12 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
             weekStart: _weekStart,
             onPreviousWeek: () => _changeWeek(-7),
             onNextWeek: () => _changeWeek(7),
+            // Récap de la semaine (7 août 2026) — voir `_WeekRecapLoader`
+            // plus bas, qui a ses propres flux indépendants de ceux de la
+            // liste de créneaux ci-dessous (simple et découplé, quitte à
+            // dupliquer l'abonnement Firestore — sans coût réel, ce sont
+            // déjà des flux temps réel ouverts par ailleurs).
+            recap: uid == null ? null : _WeekRecapLoader(weekStart: _weekStart, uid: uid),
           ),
           Expanded(
             child: GestureDetector(
@@ -288,11 +297,26 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                                     !_dayOf(slot.date).isAfter(currentWeekEnd);
                                 final myReg = myRegistrations[slot.id];
                                 final isPending = _pendingSlotIds.contains(slot.id);
+                                // Couleur par statut d'inscription (10 août
+                                // 2026, demande de Margaux — voir
+                                // `SlotCard.colorMode`) : un individuel est
+                                // toujours "confirmé" pour l'adhérent à qui
+                                // il est poussé (pas d'inscription à
+                                // proprement parler, voir `_visibleForUser`
+                                // plus haut) ; un collectif/duo suit le
+                                // statut réel de l'inscription, `null` si
+                                // l'adhérent n'y est pas inscrit (couleurs
+                                // neutres).
+                                final registrationStatus = slot.type == 'individual'
+                                    ? RegistrationStatus.confirmed
+                                    : myReg?.status;
 
                                 return SlotCard(
                                   slot: slot,
                                   countBelowTime: true,
                                   showCount: isRegisterable,
+                                  colorMode: SlotCardColorMode.byRegistrationStatus,
+                                  registrationStatus: registrationStatus,
                                   // Même pop-up "inscrits / liste d'attente"
                                   // que côté coach (voir
                                   // `manage_planning_screen.dart`), réservée
@@ -352,6 +376,151 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Calcule et affiche le récap de la semaine (section 2.2ter — refonte du 9
+/// août 2026, voir la doc de classe de `WeekRecapRow` : un carré par jour,
+/// du lundi au vendredi, pas une pastille par formule comme dans la
+/// première version). Affiché comme `recap` de `WeekNavBar`, sous la ligne
+/// "Semaine du XX/XX" — un aller-retour le 10 août 2026 a brièvement testé
+/// une mise en page sans cette ligne, revenue à l'identique le même jour à
+/// la demande de Margaux.
+///
+/// Pour chaque jour (lundi → vendredi), la ou les formules "présentes" ce
+/// jour précis pour l'adhérent sont :
+/// - collectif/duo : une inscription (confirmée OU en liste d'attente — les
+///   deux signifient "concerné.e par ce créneau ce jour-là") sur un créneau
+///   de ce type CE jour précis.
+/// - individuel : un créneau individuel poussé par le coach pour cet
+///   adhérent précisément CE jour-là (`SlotModel.adherentUid`, pas
+///   d'inscription à part — donc toujours "confirmé", jamais de liste
+///   d'attente possible sur ce type).
+/// - Rekovery : une demande dont la date effective (celle proposée par le
+///   coach si le statut est [RekoveryRequestStatus.proposed], sinon la date
+///   demandée) tombe CE jour-là, et dont le statut n'est ni refusé ni
+///   annulé.
+///
+/// **Couleur du carré (refonte du 10 août 2026, demande de Margaux)** : le
+/// statut (`DayRecapStatus`, `week_recap_row.dart` — `confirmed`/vert
+/// flashy ou `waitlisted`/moutarde) est désormais calculé PAR FORMULE, pas
+/// globalement pour le jour entier — ce qui permet au carré d'afficher 2
+/// couleurs différentes le même jour (ex. un cours confirmé ET un Rekovery
+/// en attente, voir la doc de classe de `WeekRecapRow` pour le rendu en 2
+/// triangles). Pour une formule donnée : `confirmed` si son inscription
+/// collective/duo est confirmée, si c'est un créneau individuel (toujours
+/// confirmé), ou si sa demande Rekovery est `accepted` ; `waitlisted`
+/// sinon (liste d'attente collective/duo, ou demande Rekovery
+/// `pending`/`proposed`). Si plusieurs occurrences de la MÊME formule le
+/// même jour ont des statuts différents (ex. 2 créneaux collectifs), la
+/// confirmation prime pour cette formule. Un jour sans aucune occurrence
+/// reste gris (`dayFormulas[i].isEmpty`, pas un statut).
+///
+/// Flux Firestore propres, indépendants de ceux utilisés par la liste de
+/// créneaux plus bas dans l'écran — plus simple à isoler ainsi (le récap
+/// vit dans le bandeau, hors de l'arbre des `StreamBuilder` imbriqués de la
+/// liste) que d'essayer de faire remonter des données depuis un widget
+/// enfant profondément imbriqué.
+class _WeekRecapLoader extends StatelessWidget {
+  final DateTime weekStart;
+  final String uid;
+  const _WeekRecapLoader({required this.weekStart, required this.uid});
+
+  static DateTime _dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  /// Date "effective" d'une demande Rekovery : celle proposée par le coach
+  /// si la demande est encore en attente de réponse sur cette proposition,
+  /// sinon la date initialement demandée.
+  static DateTime _effectiveDate(RekoveryRequestModel r) =>
+      (r.status == RekoveryRequestStatus.proposed && r.proposedDate != null)
+          ? r.proposedDate!
+          : r.date;
+
+  @override
+  Widget build(BuildContext context) {
+    final planningRepo = context.read<PlanningRepository>();
+    final regRepo = context.read<RegistrationRepository>();
+    final rekoveryRepo = context.read<RekoveryRepository>();
+    // Lundi → vendredi uniquement (la salle est fermée le week-end,
+    // confirmé par Margaux le 9 août 2026) — donc toujours 5 jours, quel
+    // que soit `weekStart` (qui tombe déjà un lundi, voir `mondayOf`).
+    final weekDays = List.generate(5, (i) => _dayOf(weekStart).add(Duration(days: i)));
+
+    return StreamBuilder<List<SlotModel>>(
+      stream: planningRepo.watchWeekSlots(weekStart),
+      builder: (context, slotsSnapshot) {
+        final weekSlots = slotsSnapshot.data ?? const <SlotModel>[];
+        return StreamBuilder<List<RegistrationModel>>(
+          stream: regRepo.watchMyRegistrations(uid),
+          builder: (context, regSnapshot) {
+            // Statut par créneau (confirmée/liste d'attente), et non plus
+            // seulement l'identifiant du créneau — nécessaire depuis le 10
+            // août 2026 pour distinguer les deux états visuellement.
+            final myRegistrationsBySlotId = {
+              for (final r in regSnapshot.data ?? const <RegistrationModel>[]) r.slotId: r,
+            };
+            return StreamBuilder<List<RekoveryRequestModel>>(
+              stream: rekoveryRepo.watchMyRequests(uid),
+              builder: (context, rekoverySnapshot) {
+                final requests = rekoverySnapshot.data ?? const <RekoveryRequestModel>[];
+                final liveRequests = requests.where((r) =>
+                    r.status != RekoveryRequestStatus.refused &&
+                    r.status != RekoveryRequestStatus.cancelled);
+
+                final dayFormulas = <Set<String>>[];
+                final dayFormulaStatuses = <Map<String, DayRecapStatus>>[];
+                for (final day in weekDays) {
+                  final formulas = <String>{};
+                  final statuses = <String, DayRecapStatus>{};
+                  // Statut PAR FORMULE (10 août 2026, remplace l'agrégat
+                  // par jour) — la confirmation prime si plusieurs
+                  // occurrences de la même formule le même jour ont des
+                  // statuts différents (ex. 2 créneaux collectifs, un
+                  // confirmé et un en liste d'attente).
+                  void markStatus(String formula, bool confirmed) {
+                    formulas.add(formula);
+                    final current = statuses[formula];
+                    statuses[formula] = current == DayRecapStatus.confirmed
+                        ? current!
+                        : (confirmed ? DayRecapStatus.confirmed : DayRecapStatus.waitlisted);
+                  }
+
+                  for (final s in weekSlots) {
+                    if (!_dayOf(s.date).isAtSameMomentAs(day)) continue;
+                    if (s.type == 'collective' || s.type == 'duo') {
+                      final reg = myRegistrationsBySlotId[s.id];
+                      if (reg == null) continue;
+                      markStatus(s.type == 'collective' ? 'collectif' : 'duo',
+                          reg.status == RegistrationStatus.confirmed);
+                    } else if (s.type == 'individual' && s.adherentUid == uid) {
+                      // Jamais de liste d'attente pour un individuel (créneau
+                      // poussé directement par le coach) — toujours confirmé.
+                      markStatus('individuel', true);
+                    }
+                  }
+                  final rekoveryToday =
+                      liveRequests.where((r) => _dayOf(_effectiveDate(r)).isAtSameMomentAs(day));
+                  if (rekoveryToday.isNotEmpty) {
+                    // `pending`/`proposed` : en attente d'une réponse,
+                    // affiché "En attente" ailleurs dans l'app (voir
+                    // `rekovery_request_card.dart`).
+                    markStatus('rekovery',
+                        rekoveryToday.any((r) => r.status == RekoveryRequestStatus.accepted));
+                  }
+                  dayFormulas.add(formulas);
+                  dayFormulaStatuses.add(statuses);
+                }
+
+                return WeekRecapRow(
+                  dayFormulas: dayFormulas,
+                  dayFormulaStatuses: dayFormulaStatuses,
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }

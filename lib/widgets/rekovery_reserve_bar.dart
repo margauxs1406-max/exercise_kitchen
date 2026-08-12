@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/closure_model.dart';
 import '../services/rekovery_repository.dart';
 import '../theme/responsive.dart';
+import '../utils/adaptive_pickers.dart';
 import '../utils/week_utils.dart';
 import 'picker_tile.dart';
 
@@ -55,7 +56,7 @@ class _RekoveryReserveBarState extends State<RekoveryReserveBar> {
     final initial = _date == null || _date!.isBefore(today) || _date!.isAfter(lastDay)
         ? today
         : _date!;
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: initial,
       firstDate: today,
@@ -66,9 +67,10 @@ class _RekoveryReserveBarState extends State<RekoveryReserveBar> {
   }
 
   // Créneau Rekovery accepté : 9h00 à 17h45 inclus (demande du 6 août
-  // 2026). `showTimePicker` ne permet pas de bloquer nativement une plage
-  // horaire, donc la validation se fait après le choix — avec un message
-  // explicite plutôt qu'un refus silencieux.
+  // 2026). Ni `showTimePicker` (Material) ni `CupertinoDatePicker` ne
+  // permettent de bloquer nativement une plage horaire, donc la validation
+  // se fait après le choix — avec un message explicite plutôt qu'un refus
+  // silencieux.
   static const _kMinMinutesOfDay = 9 * 60;
   static const _kMaxMinutesOfDay = 17 * 60 + 45;
 
@@ -78,7 +80,8 @@ class _RekoveryReserveBarState extends State<RekoveryReserveBar> {
   }
 
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _time ?? TimeOfDay.now());
+    final picked =
+        await showAdaptiveTimePicker(context: context, initialTime: _time ?? TimeOfDay.now());
     if (picked == null) return;
     if (!_isWithinAllowedWindow(picked)) {
       if (mounted) {

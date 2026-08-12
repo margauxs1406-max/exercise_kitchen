@@ -118,12 +118,47 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen> {
                 isDense: true,
                 dropdownColor: AppColors.black,
                 iconEnabledColor: AppColors.white,
-                style: AppTheme.headerTitleStyle,
+                // Taille de police : +2pt le 9 août 2026, ramenée à +1pt le
+                // 10 août 2026 (demande de Margaux) par rapport au reste de
+                // l'en-tête ([AppTheme.headerTitleStyle], qui hérite de
+                // `context.sp(20)`).
+                style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(21)),
+                // `selectedItemBuilder` + `alignment` (10 août 2026 : 2e
+                // correctif, le 1er du même jour — envelopper le texte dans
+                // un `Center` à l'intérieur de `selectedItemBuilder` — n'a
+                // pas suffi). `DropdownButton` dimensionne le bouton FERMÉ
+                // sur la largeur du plus long des libellés du cycle
+                // (`INTERMÉDIAIRE 1/2`), pour ne jamais changer de largeur
+                // selon la semaine affichée (`IndexedStack` interne, qui
+                // dimensionne sur le plus grand de TOUS les libellés
+                // possibles). Le libellé COURANT, lui, est ensuite
+                // positionné DANS cette largeur réservée selon
+                // `DropdownButton.alignment` — dont la valeur par défaut,
+                // `AlignmentDirectional.centerStart` (= à GAUCHE), est la
+                // vraie cause du problème : un `Center` posé À L'INTÉRIEUR
+                // de `selectedItemBuilder` n'a aucun effet, car ce `Center`
+                // se contente d'envelopper le texte à sa taille naturelle
+                // (sans l'étirer) — c'est la position de ce bloc DANS la
+                // largeur réservée, gérée par `alignment`, qui compte.
+                // `alignment: Alignment.center` ci-dessous corrige ça pour
+                // de vrai.
+                alignment: Alignment.center,
+                selectedItemBuilder: (context) => _weekTypeLabels.entries
+                    .map(
+                      (e) => Text(
+                        e.value.toUpperCase(),
+                        style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(21)),
+                      ),
+                    )
+                    .toList(),
                 // Section 1.4 : cycle de 6 semaines (2 basiques, 2
                 // intermédiaires, 2 dynamiques) — voir `kWeekTypeCycle`.
                 // Choisir manuellement une valeur ici répercute le cycle
                 // sur toutes les semaines suivantes (voir
-                // `PlanningRepository.setWeekType`).
+                // `PlanningRepository.setWeekType`). La flèche par défaut
+                // du framework (teintée en blanc via `iconEnabledColor`
+                // ci-dessus) reste visible — demande du 10 août 2026,
+                // annule la suppression du 9 août.
                 items: _weekTypeLabels.entries
                     .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value.toUpperCase())))
                     .toList(),

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/user_model.dart';
 import '../../services/user_repository.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 
 /// Libellés affichés pour chaque formule (section 5) — les clés Firestore
@@ -32,8 +33,17 @@ class _CreateAdherentFormScreenState extends State<CreateAdherentFormScreen> {
   final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
+  // Carnet Rekovery initial (section 5, 7 août 2026) — pré-rempli à 10 par
+  // défaut, uniquement pertinent pour un adhérent "Rekovery seul" (voir
+  // `UserModel.isRekoverySoloOnly`) : un adhérent qui combine Rekovery avec
+  // une formule sportive a un accès illimité, sans carnet à gérer (même
+  // logique que la fiche adhérent, voir `adherent_detail_screen.dart`).
+  final _rekoveryCreditsController = TextEditingController(text: '10');
   final Set<String> _selectedFormulas = {};
   bool _submitting = false;
+
+  bool get _isRekoverySoloOnly =>
+      _selectedFormulas.length == 1 && _selectedFormulas.contains('rekovery');
 
   @override
   void dispose() {
@@ -41,6 +51,7 @@ class _CreateAdherentFormScreenState extends State<CreateAdherentFormScreen> {
     _lastNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
+    _rekoveryCreditsController.dispose();
     super.dispose();
   }
 
@@ -54,6 +65,8 @@ class _CreateAdherentFormScreenState extends State<CreateAdherentFormScreen> {
         email: _emailController.text.trim(),
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         formulas: _selectedFormulas,
+        rekoveryCreditsRemaining:
+            _isRekoverySoloOnly ? int.tryParse(_rekoveryCreditsController.text.trim()) ?? 10 : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -116,26 +129,76 @@ class _CreateAdherentFormScreenState extends State<CreateAdherentFormScreen> {
                 alignment: Alignment.centerLeft,
                 child: Text('Formules', style: Theme.of(context).textTheme.titleMedium),
               ),
-              ...kAllFormulas.map(
-                (formula) => CheckboxListTile(
-                  value: _selectedFormulas.contains(formula),
-                  onChanged: (checked) => setState(() {
-                    if (checked ?? false) {
-                      _selectedFormulas.add(formula);
-                    } else {
-                      _selectedFormulas.remove(formula);
-                    }
-                  }),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                  // Réduit la hauteur de chaque ligne (56dp par défaut) et
-                  // resserre encore l'espacement vertical intrinsèque du
-                  // `ListTile` sous-jacent.
-                  dense: true,
-                  visualDensity: const VisualDensity(vertical: -4),
-                  title: Text(_kFormulaLabels[formula] ?? formula),
+              // Style aligné sur la fiche adhérent (7 août 2026, demande de
+              // Margaux) — fond blanc (carte), case à cocher à contour
+              // orange, police agrandie : mêmes réglages que
+              // `adherent_detail_screen.dart` pour que les deux écrans soient
+              // visuellement identiques.
+              Card(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: context.hp(4)),
+                  child: Column(
+                    children: kAllFormulas
+                        .map(
+                          (formula) => CheckboxListTile(
+                            value: _selectedFormulas.contains(formula),
+                            onChanged: (checked) => setState(() {
+                              if (checked ?? false) {
+                                _selectedFormulas.add(formula);
+                              } else {
+                                _selectedFormulas.remove(formula);
+                              }
+                            }),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            contentPadding: EdgeInsets.symmetric(horizontal: context.wp(12)),
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -4),
+                            horizontalTitleGap: context.wp(4),
+                            side: const BorderSide(color: AppColors.orange, width: 1.5),
+                            title: Text(
+                              _kFormulaLabels[formula] ?? formula,
+                              style: TextStyle(fontSize: context.sp(16)),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
+              // Carnet Rekovery initial : uniquement affiché pour un futur
+              // adhérent "Rekovery seul" (voir `_isRekoverySoloOnly`) — un
+              // adhérent qui combine Rekovery avec une formule sportive a un
+              // accès illimité, sans carnet à préremplir.
+              if (_isRekoverySoloOnly) ...[
+                SizedBox(height: context.hp(20)),
+                // Titre au-dessus du champ plutôt que `labelText` flottant
+                // (9 août 2026, demande de Margaux) : avec le style de champ
+                // actuel (bordure pleine), le libellé flottant se
+                // superposait visuellement au contour du champ une fois
+                // celui-ci non focus — même principe que le titre
+                // "Formules" ci-dessus.
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Carnet Rekovery',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                SizedBox(height: context.hp(8)),
+                TextFormField(
+                  controller: _rekoveryCreditsController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(hintText: '10 séances par défaut'),
+                  validator: (v) {
+                    if (!_isRekoverySoloOnly) return null;
+                    final n = int.tryParse((v ?? '').trim());
+                    return (n == null || n < 0) ? 'Nombre invalide' : null;
+                  },
+                ),
+              ],
               SizedBox(height: context.hp(24)),
               ElevatedButton(
                 onPressed: _submitting ? null : () => _submit(repo),

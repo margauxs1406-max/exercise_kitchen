@@ -12,9 +12,13 @@ class AppColors {
   static const Color lightGrey = Color(0xFFF2F2F2); // Fonds de sections, cartes
   static const Color mediumGrey = Color(0xFF8C8C8C); // Textes secondaires, bordures
   static const Color orange = Color(0xFFFF6B35); // CTA, badges, alertes importantes
-  static const Color flashyGreen = Color(0xFF41D952); // Statut "Actif" (texte + coche)
+  static const Color flashyGreen = Color(0xFF41C450);
   static const Color mustardYellow = Color(0xFFCFB93B); // Statut "En attente" (texte + icône)
-  static const Color darkGrey = Color(0xFF5C5C5C); // Statut "Clôturé" (texte + croix), sans fond ni contour
+  static const Color darkGrey = Color(0xFF5C5C5C);
+  static const Color recapEmptyGrey = Color(0xFFDDDCDC); 
+  static const Color lightGreen = Color(0xFFD9F3DC);
+  static const Color lightMustard = Color(0xFFF5F1D8); // "En attente" (adhérent)
+  static const Color lightOrange = Color(0xFFFFE0D0); // "Duo" (coach)
 }
 
 class AppTheme {

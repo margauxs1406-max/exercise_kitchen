@@ -30,12 +30,19 @@ class UserRepository {
   /// Coach : crée un compte adhérent (prénom, nom, email, téléphone
   /// optionnel, formules souscrites). Un mot de passe temporaire est généré
   /// côté serveur et envoyé par email automatiquement.
+  ///
+  /// [rekoveryCreditsRemaining] (7 août 2026) : carnet Rekovery initial,
+  /// pertinent uniquement pour un adhérent "Rekovery seul" (voir
+  /// `UserModel.isRekoverySoloOnly`) — `null` sinon (accès illimité, pas de
+  /// carnet). La Cloud Function ignore ce paramètre si les formules ne
+  /// correspondent pas à "Rekovery seul", par sécurité côté serveur.
   Future<CreateAdherentResult> createAdherentAccount({
     required String firstName,
     required String lastName,
     required String email,
     String? phone,
     Set<String> formulas = const {},
+    int? rekoveryCreditsRemaining,
   }) async {
     final callable = _functions.httpsCallable('createAdherentAccount');
     final result = await callable.call<Map<String, dynamic>>({
@@ -44,6 +51,7 @@ class UserRepository {
       'email': email,
       'phone': phone,
       'formulas': formulas.toList(),
+      'rekoveryCreditsRemaining': rekoveryCreditsRemaining,
     });
     return CreateAdherentResult(
       uid: result.data['uid'] as String,
@@ -95,10 +103,27 @@ class UserRepository {
 
   /// Coach : modifie le numéro de téléphone d'un adhérent, modifiable à tout
   /// moment depuis sa fiche (section 5) — `null`/vide efface le numéro
-  /// (redevient "Téléphone non renseigné").
+  /// (redevient "Téléphone non renseigné"). Réutilisée aussi par l'adhérent
+  /// lui-même depuis son propre profil (7 août 2026, voir
+  /// `adherent_profile_screen.dart`) : les règles Firestore autorisent déjà
+  /// un adhérent à modifier son propre `phone` (seuls `role`/`status`/`email`
+  /// sont bloqués en auto-modification), donc aucun changement de règle
+  /// n'était nécessaire pour ce second usage.
   Future<void> updatePhone(String uid, String? phone) {
     return _firestore.collection('users').doc(uid).update({
       'phone': (phone == null || phone.isEmpty) ? null : phone,
+    });
+  }
+
+  /// Adhérent : modifie son propre prénom/nom depuis son profil (7 août
+  /// 2026) — même raisonnement que [updatePhone] ci-dessus : `firstName`/
+  /// `lastName` ne font pas partie des champs bloqués en auto-modification
+  /// (`role`/`status`/`email`), donc aucun changement de `firestore.rules`
+  /// n'a été nécessaire.
+  Future<void> updateName(String uid, {required String firstName, required String lastName}) {
+    return _firestore.collection('users').doc(uid).update({
+      'firstName': firstName,
+      'lastName': lastName,
     });
   }
 

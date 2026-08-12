@@ -18,7 +18,7 @@
  *  - créneau collectif/duo à un seul inscrit, 24h avant (4h le lundi) —
  *    `checkSingleRegistrantSlots` ;
  *  - rappel de cours 2h avant à l'adhérent inscrit — `sendCourseReminders` ;
- *  - rappel Rekovery 30 min avant, aux coachs — `sendRekoveryReminders` ;
+ *  - rappel Rekovery 1h avant, aux coachs — `sendRekoveryReminders` ;
  *  - création/modification d'un workshop ou d'une fermeture, à tout le
  *    monde — `onSlotCreated`/`onSlotUpdated`/`onClosureCreated`/
  *    `onClosureUpdated` ;
@@ -367,13 +367,15 @@ export const createAdherentAccount = onCall(
   async (request) => {
     await requireCoach(request.auth?.uid);
 
-    const { firstName, lastName, email, phone, formulas } = request.data as {
-      firstName?: string;
-      lastName?: string;
-      email?: string;
-      phone?: string | null;
-      formulas?: string[];
-    };
+    const { firstName, lastName, email, phone, formulas, rekoveryCreditsRemaining } =
+      request.data as {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        phone?: string | null;
+        formulas?: string[];
+        rekoveryCreditsRemaining?: number | null;
+      };
 
     if (!firstName || !lastName || !email) {
       throw new HttpsError(
@@ -381,6 +383,17 @@ export const createAdherentAccount = onCall(
         "Prénom, nom et email sont requis."
       );
     }
+
+    // Carnet Rekovery initial (7 août 2026) : uniquement pertinent pour un
+    // adhérent "Rekovery seul" (une seule formule, "rekovery") — recalculé
+    // ici côté serveur (pas de confiance dans un booléen envoyé par le
+    // client) plutôt qu'un accès illimité qui n'a pas de carnet à gérer.
+    const isRekoverySoloOnly =
+      (formulas ?? []).length === 1 && (formulas ?? []).includes("rekovery");
+    const initialCredits =
+      isRekoverySoloOnly && rekoveryCreditsRemaining != null
+        ? Math.max(0, Math.trunc(rekoveryCreditsRemaining))
+        : null;
 
     const temporaryPassword = generateTemporaryPassword();
 
@@ -402,6 +415,7 @@ export const createAdherentAccount = onCall(
       consentAcceptedAt: null,
       consentVersion: null,
       formulas: formulas ?? [],
+      rekoveryCreditsRemaining: initialCredits,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -478,6 +492,80 @@ export const registerForSlot = onCall(
       tx.set(regRef, {
         slotId,
         userId: uid,
+        status: confirmed ? "confirmed" : "waitlisted",
+        waitlistPosition: confirmed ? null : waitlistCount + 1,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      tx.update(slotRef, confirmed
+        ? { registeredCount: registeredCount + 1 }
+        : { waitlistCount: waitlistCount + 1 });
+
+      return { status: confirmed ? "confirmed" : "waitlisted" };
+    });
+  }
+);
+
+/**
+ * Coach : inscrit un adhérent précis (pas l'appelant lui-même) à un
+ * créneau — utilisé pour préremplir à l'avance les 2 places d'un cours duo
+ * (section 1.3, demande du 7 août 2026) quand le coach connaît déjà les
+ * noms. C'est une VRAIE inscription (compte dans la capacité, bloque la
+ * place comme n'importe quelle inscription libre) — Margaux a confirmé ce
+ * choix plutôt qu'une simple note, voir échange du 7 août 2026 — d'où une
+ * nouvelle Cloud Function plutôt qu'une réutilisation de [registerForSlot],
+ * qui n'inscrit que `request.auth.uid` (l'appelant) et ne prend aucun
+ * paramètre pour inscrire un tiers.
+ *
+ * Même logique transactionnelle que [registerForSlot] (confirmée si de la
+ * place, sinon liste d'attente) — un coach pourrait en théorie préremplir
+ * un créneau déjà complet, auquel cas l'adhérent atterrit en liste
+ * d'attente comme n'importe qui.
+ */
+export const coachRegisterAdherentForSlot = onCall(
+  { region: REGION },
+  async (request) => {
+    await requireCoach(request.auth?.uid);
+
+    const { slotId, adherentUid } = request.data as {
+      slotId?: string;
+      adherentUid?: string;
+    };
+    if (!slotId || !adherentUid) {
+      throw new HttpsError("invalid-argument", "slotId et adherentUid requis.");
+    }
+
+    const slotRef = db.collection("slots").doc(slotId);
+
+    const existing = await db
+      .collection("registrations")
+      .where("slotId", "==", slotId)
+      .where("userId", "==", adherentUid)
+      .limit(1)
+      .get();
+    if (!existing.empty) {
+      throw new HttpsError(
+        "already-exists",
+        "Cet.te adhérent.e est déjà inscrit.e ou en liste d'attente sur ce créneau."
+      );
+    }
+
+    return db.runTransaction(async (tx) => {
+      const slotSnap = await tx.get(slotRef);
+      if (!slotSnap.exists) {
+        throw new HttpsError("not-found", "Ce créneau n'existe plus.");
+      }
+      const slot = slotSnap.data()!;
+      const registeredCount = slot.registeredCount ?? 0;
+      const waitlistCount = slot.waitlistCount ?? 0;
+      const capacity = slot.capacity ?? 0;
+
+      const regRef = db.collection("registrations").doc();
+      const confirmed = registeredCount < capacity;
+
+      tx.set(regRef, {
+        slotId,
+        userId: adherentUid,
         status: confirmed ? "confirmed" : "waitlisted",
         waitlistPosition: confirmed ? null : waitlistCount + 1,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -666,10 +754,19 @@ export const requestRekoverySlot = onCall(
     });
 
     const tokens = await getCoachTokens();
+    // Titre/texte simplifiés (10 août 2026, demande de Margaux) — "à
+    // [heure] le [date]" plutôt que "[date] à [heure]" (`formatDateAt`,
+    // inchangée par ailleurs) : plus naturel en français pour une date
+    // ("le 12/08", pas "à 12/08").
+    const dayMonth = new Intl.DateTimeFormat("fr-FR", {
+      timeZone: NOUMEA_TIME_ZONE,
+      day: "2-digit",
+      month: "2-digit",
+    }).format(dateTimestamp.toDate());
     await sendPushToTokens(
       tokens,
-      "Nouvelle demande Rekovery",
-      `${adherentName} demande un créneau ${formatDateAt(dateTimestamp, startTime)}.`
+      "Nouvelle demande",
+      `${adherentName} demande un Rekovery à ${startTime.replace(":", "h")} le ${dayMonth}.`
     );
 
     return { requestId: reqRef.id };
@@ -1275,14 +1372,15 @@ export const sendCourseReminders = onSchedule(
 );
 
 /**
- * Toutes les 10 minutes, rappelle aux coachs 30 minutes avant une demande
- * Rekovery acceptée, pour qu'ils pensent à allumer le sauna avant l'arrivée
- * de l'adhérent. N'envoie qu'une seule fois par demande (`reminderSent`).
+ * Toutes les 10 minutes, rappelle aux coachs 1h avant une demande Rekovery
+ * acceptée (60 min, remonté de 30 min le 10 août 2026 à la demande de
+ * Margaux), pour qu'ils pensent à allumer le sauna avant l'arrivée de
+ * l'adhérent. N'envoie qu'une seule fois par demande (`reminderSent`).
  */
 export const sendRekoveryReminders = onSchedule(
   { schedule: "*/10 * * * *", region: REGION },
   async () => {
-    const REMINDER_MINUTES_BEFORE = 30;
+    const REMINDER_MINUTES_BEFORE = 60;
     const { start, end } = scanWindow();
     const snap = await db
       .collection("rekoveryRequests")
@@ -1303,11 +1401,8 @@ export const sendRekoveryReminders = onSchedule(
 
       try {
         const tokens = await getCoachTokens();
-        await sendPushToTokens(
-          tokens,
-          "Rekovery dans 30 min",
-          `${req.adherentName} arrive à ${(req.startTime as string).replace(":", "h")}. Allume le four !`
-        );
+        // Titre/texte simplifiés (10 août 2026, demande de Margaux).
+        await sendPushToTokens(tokens, "Rekovery", `${req.adherentName} arrive dans 1h.`);
         await doc.ref.update({ reminderSent: true });
       } catch (err) {
         logger.error(`sendRekoveryReminders: échec pour la demande ${doc.id}`, err);

@@ -19,6 +19,10 @@ import '../../widgets/week_header.dart';
 /// adhérent (`adherent_rekovery_screen.dart`) — pas de pagination par
 /// semaine. Possède son propre en-tête ([WeekHeader], titre "Rekovery"),
 /// comme `ManagePlanningScreen` pour le planning.
+///
+/// Les demandes [RekoveryRequestStatus.cancelled] sont toujours masquées
+/// (10 août 2026, demande de Margaux) — inutile d'encombrer le planning du
+/// coach avec des séances que l'adhérent a lui-même annulées.
 class CoachRekoveryScreen extends StatelessWidget {
   const CoachRekoveryScreen({super.key});
 
@@ -45,12 +49,16 @@ class CoachRekoveryScreen extends StatelessWidget {
           // pour les demandes [pending] : un coach doit voir et pouvoir
           // traiter une demande en attente même si, par accident (fuseau
           // horaire, adhérent qui a shifté sa demande), sa date est déjà
-          // légèrement passée.
+          // légèrement passée. Les demandes [cancelled] sont en plus
+          // toujours masquées (10 août 2026, demande de Margaux) : une
+          // fois annulée par l'adhérent, une demande n'a plus d'intérêt à
+          // apparaître dans le planning Rekovery du coach.
           final visible = snapshot.data!
               .where((r) =>
-                  !_dayOf(r.date).isBefore(today) ||
-                  r.status == RekoveryRequestStatus.pending ||
-                  r.status == RekoveryRequestStatus.proposed)
+                  r.status != RekoveryRequestStatus.cancelled &&
+                  (!_dayOf(r.date).isBefore(today) ||
+                      r.status == RekoveryRequestStatus.pending ||
+                      r.status == RekoveryRequestStatus.proposed))
               .toList()
             ..sort((a, b) {
               final dateCompare = a.date.compareTo(b.date);

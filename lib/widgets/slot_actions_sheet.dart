@@ -5,6 +5,7 @@ import '../models/slot_model.dart';
 import '../services/planning_repository.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/adaptive_pickers.dart';
 import 'picker_tile.dart';
 
 /// Section 1.3 : appui long sur une carte de cours duo, individuel ou
@@ -136,7 +137,7 @@ class _EditSlotDialogState extends State<_EditSlotDialog> {
     // rencontré dans `add_course_screen.dart`) : un cours déjà passé garde
     // ici sa date d'origine comme point de départ, mais on ne repropose
     // jamais une date antérieure à aujourd'hui dans le calendrier.
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: _date.isBefore(today) ? today : _date,
       firstDate: today,
@@ -146,7 +147,7 @@ class _EditSlotDialogState extends State<_EditSlotDialog> {
   }
 
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _time);
+    final picked = await showAdaptiveTimePicker(context: context, initialTime: _time);
     if (picked != null) setState(() => _time = picked);
   }
 
@@ -255,7 +256,7 @@ class _EditWorkshopDialogState extends State<_EditWorkshopDialog> {
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: _date.isBefore(today) ? today : _date,
       firstDate: today,
@@ -265,7 +266,7 @@ class _EditWorkshopDialogState extends State<_EditWorkshopDialog> {
   }
 
   Future<void> _pickTime({required bool isStart}) async {
-    final picked = await showTimePicker(
+    final picked = await showAdaptiveTimePicker(
       context: context,
       initialTime: isStart ? _startTime : _endTime,
     );

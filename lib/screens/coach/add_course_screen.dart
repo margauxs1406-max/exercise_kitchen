@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../../models/user_model.dart';
 import '../../services/planning_repository.dart';
+import '../../services/registration_repository.dart';
 import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
+import '../../utils/adaptive_pickers.dart';
 import '../../widgets/picker_tile.dart';
 
 /// Ajout au planning côté coach, en deux parties (remplace l'ancien
@@ -159,13 +161,23 @@ class _AddCourseTabState extends State<_AddCourseTab> {
   TimeOfDay? _startTime;
   String? _selectedAdherentUid;
   String? _selectedAdherentLabel;
+  // Duo : préremplissage facultatif des 2 places (section 1.3, 7 août 2026)
+  // — quand le coach connaît déjà les 2 adhérents concernés. Margaux a
+  // confirmé que ceci doit être une VRAIE inscription (compte dans la
+  // capacité), pas une simple note — voir `coachRegisterAdherentForSlot`.
+  // Les deux restent facultatifs : le coach peut aussi créer un duo "vide",
+  // ouvert aux inscriptions libres, comme avant.
+  String? _duoAdherent1Uid;
+  String? _duoAdherent1Label;
+  String? _duoAdherent2Uid;
+  String? _duoAdherent2Label;
   bool _submitting = false;
 
   String _fmt(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: widget.weekStart,
       firstDate: widget.weekStart,
@@ -175,7 +187,7 @@ class _AddCourseTabState extends State<_AddCourseTab> {
   }
 
   Future<void> _pickStartTime() async {
-    final picked = await showTimePicker(
+    final picked = await showAdaptiveTimePicker(
       context: context,
       initialTime: _startTime ?? const TimeOfDay(hour: 10, minute: 0),
     );
@@ -198,6 +210,15 @@ class _AddCourseTabState extends State<_AddCourseTab> {
           .showSnackBar(const SnackBar(content: Text('Choisis un adhérent.')));
       return;
     }
+    if (_kind == 'duo' &&
+        _duoAdherent1Uid != null &&
+        _duoAdherent2Uid != null &&
+        _duoAdherent1Uid == _duoAdherent2Uid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Les 2 adhérents doivent être différents.')),
+      );
+      return;
+    }
     setState(() => _submitting = true);
     try {
       final repo = context.read<PlanningRepository>();
@@ -209,7 +230,16 @@ class _AddCourseTabState extends State<_AddCourseTab> {
           adherentLabel: _selectedAdherentLabel!,
         );
       } else {
-        await repo.addDuoSlotForWeek(date: _selectedDate!, startTime: _fmt(_startTime!));
+        final slotId =
+            await repo.addDuoSlotForWeek(date: _selectedDate!, startTime: _fmt(_startTime!));
+        final registrationRepo = context.read<RegistrationRepository>();
+        for (final uid in [_duoAdherent1Uid, _duoAdherent2Uid]) {
+          if (uid == null) continue;
+          await registrationRepo.coachRegisterAdherentForSlot(
+            slotId: slotId,
+            adherentUid: uid,
+          );
+        }
       }
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -254,11 +284,43 @@ class _AddCourseTabState extends State<_AddCourseTab> {
           if (_kind == 'individuel') ...[
             SizedBox(height: context.hp(12)),
             _AdherentPicker(
+              requiredFormula: 'individuel',
+              fieldLabel: 'Adhérent',
+              emptyMessage: "Aucun adhérent actif n'a la formule Individuel pour l'instant.",
               selectedUid: _selectedAdherentUid,
               selectedLabel: _selectedAdherentLabel,
               onSelected: (uid, label) => setState(() {
                 _selectedAdherentUid = uid;
                 _selectedAdherentLabel = label;
+              }),
+            ),
+          ],
+          // Duo : préremplissage facultatif des 2 places (7 août 2026) — les
+          // deux sélecteurs sont indépendants et restent vides par défaut,
+          // le coach peut aussi n'en remplir qu'un seul, ou aucun.
+          if (_kind == 'duo') ...[
+            SizedBox(height: context.hp(12)),
+            _AdherentPicker(
+              requiredFormula: 'duo',
+              fieldLabel: '1er adhérent (facultatif)',
+              emptyMessage: "Aucun adhérent actif n'a la formule Duo pour l'instant.",
+              selectedUid: _duoAdherent1Uid,
+              selectedLabel: _duoAdherent1Label,
+              onSelected: (uid, label) => setState(() {
+                _duoAdherent1Uid = uid;
+                _duoAdherent1Label = label;
+              }),
+            ),
+            SizedBox(height: context.hp(12)),
+            _AdherentPicker(
+              requiredFormula: 'duo',
+              fieldLabel: '2e adhérent (facultatif)',
+              emptyMessage: "Aucun adhérent actif n'a la formule Duo pour l'instant.",
+              selectedUid: _duoAdherent2Uid,
+              selectedLabel: _duoAdherent2Label,
+              onSelected: (uid, label) => setState(() {
+                _duoAdherent2Uid = uid;
+                _duoAdherent2Label = label;
               }),
             ),
           ],
@@ -279,10 +341,13 @@ class _AddCourseTabState extends State<_AddCourseTab> {
   }
 }
 
-/// Sélecteur d'adhérent pour un cours individuel — limité aux adhérents
-/// actifs ayant souscrit la formule "Individuel" (sinon le créneau créé ne
-/// serait même pas visible pour eux côté planning, voir
-/// `weekly_planning_screen.dart`).
+/// Sélecteur d'adhérent — utilisé pour un cours individuel (limité aux
+/// adhérents actifs ayant souscrit la formule "Individuel", sinon le
+/// créneau créé ne serait même pas visible pour eux côté planning, voir
+/// `weekly_planning_screen.dart`) ET, depuis le 7 août 2026, pour
+/// préremplir à l'avance les 2 places d'un cours duo (formule "Duo").
+/// [requiredFormula] généralise ce qui était auparavant câblé en dur sur
+/// `'individuel'`.
 ///
 /// Utilise `showMenu` + `PopupMenuItem`/`PopupMenuDivider` (et non
 /// `DropdownMenu`, ni `DropdownButtonFormField`) : `showMenu` donne un
@@ -294,11 +359,17 @@ class _AddCourseTabState extends State<_AddCourseTab> {
 /// que "Choisir un adhérent" a exactement le même style/taille que les
 /// deux autres — sans dupliquer aucune valeur de style.
 class _AdherentPicker extends StatefulWidget {
+  final String requiredFormula;
+  final String fieldLabel;
+  final String emptyMessage;
   final String? selectedUid;
   final String? selectedLabel;
   final void Function(String uid, String label) onSelected;
 
   const _AdherentPicker({
+    required this.requiredFormula,
+    required this.fieldLabel,
+    required this.emptyMessage,
     required this.selectedUid,
     required this.selectedLabel,
     required this.onSelected,
@@ -317,8 +388,17 @@ class _AdherentPickerState extends State<_AdherentPicker> {
     final topLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
     final bottomRight =
         box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay);
+    // Décalage de 8px vers le haut (10 août 2026, demande de Margaux —
+    // "supprime le blanc tout en haut des listes déroulantes") : `showMenu`
+    // ajoute systématiquement un padding vertical interne de 8px avant le
+    // premier élément (constante interne du framework Material, stable
+    // depuis les premières versions de Flutter, non exposée publiquement
+    // pour être désactivée autrement) — ce décalage compense exactement ce
+    // padding en remontant tout le menu de 8px, pour que le premier
+    // adhérent apparaisse directement sous le champ, sans bande blanche
+    // visible au-dessus.
     final position = RelativeRect.fromRect(
-      Rect.fromPoints(topLeft, bottomRight),
+      Rect.fromPoints(topLeft, bottomRight - const Offset(0, 8)),
       Offset.zero & overlay.size,
     );
 
@@ -337,7 +417,32 @@ class _AdherentPickerState extends State<_AdherentPicker> {
       context: context,
       position: position,
       color: AppColors.white,
-      constraints: BoxConstraints(minWidth: box.size.width, maxWidth: box.size.width),
+      // Hauteur maximale de 5 adhérents (9 août 2026, demande de Margaux) —
+      // au-delà, la liste défile à l'intérieur du menu plutôt que de
+      // grandir indéfiniment (`showMenu` insère automatiquement un
+      // `SingleChildScrollView` quand le contenu dépasse `constraints`).
+      // `kMinInteractiveDimension` (48) est la hauteur par défaut d'un
+      // `PopupMenuItem` — pas une valeur de mise en page qu'on invente
+      // nous-mêmes, donc laissée telle quelle (non `context.wp/hp`) ; seuls
+      // les `PopupMenuDivider` entre les éléments sont responsive.
+      constraints: BoxConstraints(
+        minWidth: box.size.width,
+        maxWidth: box.size.width,
+        maxHeight: 5 * kMinInteractiveDimension + 4 * context.hp(1),
+      ),
+      // Correctif (12 août 2026, signalé par Margaux : "j'ai vu le texte se
+      // dérouler, puis les bandeaux blancs") : bug connu du framework
+      // Flutter, où l'animation d'ouverture par défaut d'un `showMenu`
+      // fait apparaître le TEXTE de chaque `PopupMenuItem` légèrement avant
+      // que son fond blanc ne soit complètement peint (les 2 éléments
+      // s'animent selon des calendriers internes légèrement différents) —
+      // un décalage d'une fraction de seconde, mais visible à l'œil. Comme
+      // ce menu ne contient qu'une poignée d'adhérents (pas d'animation
+      // "utile" à voir de toute façon), on désactive entièrement
+      // l'animation d'ouverture/fermeture : le menu apparaît/disparaît
+      // instantanément, ce qui élimine ce décalage puisqu'il n'y a plus de
+      // période de transition pendant laquelle il pourrait être visible.
+      popUpAnimationStyle: AnimationStyle(duration: Duration.zero, reverseDuration: Duration.zero),
       items: items,
     );
     if (uid == null) return;
@@ -357,21 +462,21 @@ class _AdherentPickerState extends State<_AdherentPicker> {
       stream: repo.watchAdherents(),
       builder: (context, snapshot) {
         final eligible = (snapshot.data ?? const <UserModel>[])
-            .where((a) => a.isActive && a.formulas.contains('individuel'))
+            .where((a) => a.isActive && a.formulas.contains(widget.requiredFormula))
             .toList();
         if (!snapshot.hasData) {
           return const LinearProgressIndicator();
         }
         if (eligible.isEmpty) {
-          return const Text(
-            "Aucun adhérent actif n'a la formule Individuel pour l'instant.",
-            style: TextStyle(color: AppColors.mediumGrey),
+          return Text(
+            widget.emptyMessage,
+            style: const TextStyle(color: AppColors.mediumGrey),
           );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _FieldLabel('Adhérent'),
+            _FieldLabel(widget.fieldLabel),
             KeyedSubtree(
               key: _fieldKey,
               child: PickerTile(
@@ -472,7 +577,7 @@ class _AddEventTabState extends State<_AddEventTab> with WidgetsBindingObserver 
     final today = DateTime(now.year, now.month, now.day);
     // Les workshops/fermetures ne sont pas limités à la semaine affichée :
     // `initialDate` peut donc toujours être aujourd'hui (voir `firstDate`).
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: today,
       firstDate: today,
@@ -510,8 +615,8 @@ class _AddEventTabState extends State<_AddEventTab> with WidgetsBindingObserver 
   }
 
   Future<void> _pickTime({required bool isStart}) async {
-    final picked =
-        await showTimePicker(context: context, initialTime: isStart ? _startTime : _endTime);
+    final picked = await showAdaptiveTimePicker(
+        context: context, initialTime: isStart ? _startTime : _endTime);
     if (picked == null) return;
     setState(() {
       if (isStart) {

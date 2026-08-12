@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/closure_model.dart';
@@ -171,6 +172,11 @@ class AdherentRekoveryScreen extends StatelessWidget {
                               // doc de classe ci-dessus.
                               showName: true,
                               isOwn: isOwn,
+                              // Couleurs par statut (10 août 2026, voir
+                              // `RekoveryRequestCard.colorByStatus`) : sans
+                              // effet sur les demandes des autres, `isOwn`
+                              // filtrant déjà en interne.
+                              colorByStatus: true,
                               // Appui long uniquement (6 août 2026), et
                               // seulement sur SA PROPRE demande : un simple
                               // tap ne déclenche plus les actions (annulation
@@ -200,7 +206,9 @@ class AdherentRekoveryScreen extends StatelessWidget {
 /// d'une formule sportive) n'a pas de compteur à afficher.
 ///
 /// Texte volontairement minimal (demande du 6 août 2026) : juste "X séances
-/// restantes" avec l'icône, sans phrase supplémentaire.
+/// restantes" avec l'icône, sans phrase supplémentaire. Icône + texte
+/// CENTRÉS dans le bandeau (10 août 2026, demande de Margaux — auparavant
+/// alignés à gauche).
 class _CreditsBanner extends StatelessWidget {
   final UserModel user;
   const _CreditsBanner({required this.user});
@@ -214,8 +222,18 @@ class _CreditsBanner extends StatelessWidget {
       color: AppColors.black,
       padding: EdgeInsets.symmetric(horizontal: context.wp(16), vertical: context.hp(12)),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.thermostat, color: AppColors.orange),
+          // Icône Rekovery : SVG dédié (7 août 2026, remplace l'icône
+          // Material `Icons.thermostat`) — voir aussi
+          // `rekovery_request_card.dart`/`adherent_rekovery_history_screen.dart`/
+          // `adherent_detail_screen.dart`, mêmes emplacements.
+          SvgPicture.asset(
+            'assets/thermometer.svg',
+            width: context.wp(24),
+            height: context.wp(24),
+            colorFilter: const ColorFilter.mode(AppColors.orange, BlendMode.srcIn),
+          ),
           SizedBox(width: context.wp(10)),
           Text(
             '$remaining séance${remaining > 1 ? 's' : ''} restante${remaining > 1 ? 's' : ''}',

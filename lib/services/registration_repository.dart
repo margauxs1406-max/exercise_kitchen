@@ -40,6 +40,22 @@ class RegistrationRepository {
     return callable.call<void>({'registrationId': registrationId});
   }
 
+  /// Coach : inscrit un adhérent précis (pas lui-même) à un créneau — utilisé
+  /// pour préremplir à l'avance les 2 places d'un cours duo (section 1.3, 7
+  /// août 2026) quand le coach connaît déjà les noms. VRAIE inscription
+  /// (compte dans la capacité), voir `coachRegisterAdherentForSlot` côté
+  /// Cloud Function pour le détail de la confirmation par Margaux.
+  Future<RegisterOutcome> coachRegisterAdherentForSlot({
+    required String slotId,
+    required String adherentUid,
+  }) async {
+    final callable = _functions.httpsCallable('coachRegisterAdherentForSlot');
+    final result = await callable
+        .call<Map<String, dynamic>>({'slotId': slotId, 'adherentUid': adherentUid});
+    final status = result.data['status'] as String;
+    return status == 'waitlisted' ? RegisterOutcome.waitlisted : RegisterOutcome.confirmed;
+  }
+
   /// Inscriptions de l'adhérent courant pour la semaine affichée (utile pour
   /// savoir quels créneaux afficher comme "inscrit" / "en liste d'attente").
   Stream<List<RegistrationModel>> watchMyRegistrations(String uid) {

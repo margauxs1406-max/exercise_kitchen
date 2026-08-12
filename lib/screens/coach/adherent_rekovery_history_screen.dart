@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -95,7 +96,14 @@ class _HistoryTile extends StatelessWidget {
         leading: CircleAvatar(
           backgroundColor: AppColors.lightGrey,
           foregroundColor: AppColors.black,
-          child: const Icon(Icons.thermostat),
+          // Icône Rekovery : SVG dédié (7 août 2026) — voir
+          // `rekovery_request_card.dart` pour le même correctif.
+          child: SvgPicture.asset(
+            'assets/thermometer.svg',
+            width: context.wp(20),
+            height: context.wp(20),
+            colorFilter: const ColorFilter.mode(AppColors.black, BlendMode.srcIn),
+          ),
         ),
         title: Text('$dayMonth à ${request.startTime.replaceFirst(':', 'h')}'),
         subtitle: request.coachNote != null && request.coachNote!.isNotEmpty
