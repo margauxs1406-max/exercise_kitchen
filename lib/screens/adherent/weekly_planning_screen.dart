@@ -626,10 +626,18 @@ class _WeekRecapLoader extends StatelessWidget {
                       final reg = myRegistrationsBySlotId[s.id];
                       if (reg == null) continue;
                       final confirmed = reg.status == RegistrationStatus.confirmed;
+                      // Gardé par le lundi de la semaine affichée (18 août
+                      // 2026, 3ᵉ demande, même jour que le reste de cette
+                      // section) — `weekStart` est toujours ce lundi (voir
+                      // doc de classe), donc pas de rouge tant qu'il n'est
+                      // pas encore atteint (les inscriptions à la semaine N
+                      // ouvrent dès le vendredi de la semaine N-1). Même
+                      // garde que `SlotCard._isAtRiskOfCancellation`.
+                      final weekStarted = !DateTime.now().isBefore(weekStart);
                       markStatus(
                         s.type == 'collective' ? 'collectif' : 'duo',
                         confirmed,
-                        atRisk: confirmed && s.registeredCount < 2,
+                        atRisk: confirmed && s.registeredCount < 2 && weekStarted,
                       );
                     } else if (s.type == 'individual' && s.adherentUid == uid) {
                       // Jamais de liste d'attente pour un individuel (créneau

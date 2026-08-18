@@ -4,6 +4,7 @@ import '../models/registration_model.dart';
 import '../models/slot_model.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/week_utils.dart';
 
 /// Détermine d'où [SlotCard] tire la couleur d'un créneau (10 août 2026,
 /// demande de Margaux — avant cette date, un seul jeu de couleurs, basé sur
@@ -91,7 +92,11 @@ class _SlotColors {
 /// `checkLowRegistrationSlotsForCoach`) ; Margaux a demandé le retrait de
 /// cette condition de délai le jour même (deuxième demande) — l'alerte
 /// push coach, elle, garde son propre seuil de 4h côté serveur, ce
-/// changement ne concerne que l'affichage client.
+/// changement ne concerne que l'affichage client. Depuis le lundi de la
+/// semaine du créneau seulement (3ᵉ demande, même jour) : les inscriptions
+/// à la semaine N ouvrant dès le vendredi de la semaine N-1, l'alerte ne
+/// s'affiche désormais qu'une fois cette semaine-là entamée (voir
+/// [_isAtRiskOfCancellation]).
 class SlotCard extends StatelessWidget {
   final SlotModel slot;
   final Widget? trailing;
@@ -129,19 +134,23 @@ class SlotCard extends StatelessWidget {
   });
 
   /// Vrai si ce créneau collectif/duo a moins de 2 inscrits (18 août 2026,
-  /// demande de Margaux) — plus de condition de délai depuis le 18 août
-  /// 2026 (deuxième demande, même jour) : à l'origine limité aux 4h
-  /// précédant le début du cours (mêmes seuils que l'alerte coach côté
-  /// serveur, `checkLowRegistrationSlotsForCoach`), Margaux a ensuite
-  /// demandé que ce signal visuel soit affiché "quoi qu'il arrive", sans
-  /// tenir compte du délai avant le début (l'ancien calcul d'heure de
-  /// début, `_slotStart`, a donc été retiré, devenu inutile). Ne concerne
-  /// ni l'individuel (toujours 1 seul inscrit, non pertinent) ni le
-  /// workshop (pas de compteur, voir [showCount]).
+  /// demande de Margaux) ET que la semaine du créneau a commencé (3ᵉ
+  /// demande, même jour) — plus de condition de délai en heures (à
+  /// l'origine limité aux 4h précédant le début du cours, mêmes seuils que
+  /// l'alerte coach côté serveur, `checkLowRegistrationSlotsForCoach`,
+  /// puis affiché "quoi qu'il arrive" un temps), mais désormais gardé par
+  /// le lundi de la semaine du créneau (`mondayOf`, `week_utils.dart`) :
+  /// les inscriptions à la semaine N ouvrant dès le vendredi de la semaine
+  /// N-1, sans cette garde tous les créneaux à moins de 2 inscrits
+  /// passaient en rouge dès le vendredi précédent, ce qui n'a de sens
+  /// qu'une fois la semaine du cours elle-même entamée. Ne concerne ni
+  /// l'individuel (toujours 1 seul inscrit, non pertinent) ni le workshop
+  /// (pas de compteur, voir [showCount]).
   bool get _isAtRiskOfCancellation {
     if (!showCount) return false;
     if (slot.type != 'collective' && slot.type != 'duo') return false;
-    return slot.registeredCount < 2;
+    if (slot.registeredCount >= 2) return false;
+    return !DateTime.now().isBefore(mondayOf(slot.date));
   }
 
   IconData get _icon {
