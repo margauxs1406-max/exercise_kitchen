@@ -9,14 +9,34 @@
  *  - registerForSlot / cancelRegistration : inscriptions/désinscriptions
  *    transactionnelles avec gestion de la capacité et de la liste d'attente
  *    (section 2.2 / 2.2bis).
- *  - generateWeeklySlots : génère chaque semaine les créneaux des cours
- *    collectifs récurrents (section 1.3 : "fixes d'une semaine à l'autre").
+ *
+ * Génération des créneaux collectifs (section 1.3 : "fixes d'une semaine à
+ * l'autre") : entièrement côté CLIENT depuis le 23 juillet 2026
+ * (`PlanningRepository.ensureCollectiveSlotsForWeek`/`kDefaultCollectiveSchedule`
+ * côté Flutter), appelée à chaque ouverture du planning coach — PAS ici.
+ * **Attention (12 août 2026, bug corrigé)** : ce fichier contenait encore
+ * jusqu'à cette date une ANCIENNE Cloud Function planifiée
+ * `generateWeeklySlots`, qui lisait une collection Firestore `courses`
+ * (système d'avant l'introduction de `kDefaultCollectiveSchedule`, jamais
+ * nettoyée) et régénérait chaque lundi à 00h05 des créneaux collectifs
+ * obsolètes (dont les créneaux 18h/12 places du lundi et vendredi que
+ * Margaux supprimait manuellement, en vain — ils réapparaissaient à chaque
+ * nouvelle semaine). Cette fonction — ainsi que la collection `courses`,
+ * plus lue par aucun code — est désormais un système mort, entièrement
+ * supprimé : la génération des créneaux collectifs ne vit plus QUE côté
+ * client, à un seul endroit. Ne jamais réintroduire de génération de
+ * créneaux collectifs côté Cloud Functions sans supprimer d'abord
+ * l'équivalent côté client (ou inversement) — avoir 2 systèmes actifs en
+ * parallèle est exactement ce qui a causé ce bug.
  *
  * Notifications push (FCM, section 4) : téléphone uniquement (pas
  * d'email/SMS), envoyées par les fonctions ci-dessous :
  *  - promotion liste d'attente → inscrit (dans `cancelRegistration`) ;
- *  - créneau collectif/duo à un seul inscrit, 24h avant (4h le lundi) —
- *    `checkSingleRegistrantSlots` ;
+ *  - créneau collectif/duo à un seul inscrit — `checkSingleRegistrantSlots`
+ *    (24h avant à l'unique inscrit.e ; aux autres adhérents de la formule à
+ *    24h ET 4h avant, depuis le 18 août 2026 — plus d'exception le lundi) ;
+ *  - créneau collectif/duo à moins de 2 inscrits, 4h avant, aux coachs —
+ *    `checkLowRegistrationSlotsForCoach` ("Manque de monde") ;
  *  - rappel de cours 2h avant à l'adhérent inscrit — `sendCourseReminders` ;
  *  - rappel Rekovery 1h avant, aux coachs — `sendRekoveryReminders` ;
  *  - création/modification d'un workshop ou d'une fermeture, à tout le
@@ -25,7 +45,9 @@
  *  - modification/suppression d'un cours duo/individuel, aux adhérents
  *    concernés — `onSlotUpdated`/`onSlotDeleted` ;
  *  - double inscription le même jour (hors Rekovery), à l'adhérent
- *    concerné — `onRegistrationCreated`/`onRegistrationUpdated`.
+ *    concerné — instantané (`onRegistrationCreated`/`onRegistrationUpdated`)
+ *    ET rappelé 24h avant le premier cours du jour concerné (depuis le 18
+ *    août 2026) — `checkSameDayDoubleBookingReminders`.
  *
  * Les tokens FCM des appareils vivent dans `users/{uid}.fcmTokens` (tableau,
  * enregistré côté client — voir `push_notification_service.dart`). Un token
@@ -49,7 +71,6 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 const REGION = "australia-southeast1";
-const WEEK_DAYS = 7;
 
 function generateTemporaryPassword(): string {
   // Mot de passe temporaire lisible mais suffisamment fort ; l'adhérent doit
@@ -95,7 +116,17 @@ async function sendPushToTokens(
   body: string
 ): Promise<void> {
   const unique = Array.from(new Set(tokens)).filter((t) => !!t);
-  if (unique.length === 0) return;
+  if (unique.length === 0) {
+    // Avertissement de diagnostic (17 août 2026) : si un destinataire attendu
+    // ne reçoit jamais de notification, ce log (visible dans la Console
+    // Firebase → Functions → Journaux) permet de vérifier si la fonction a
+    // bien tenté d'envoyer, mais n'avait AUCUN token enregistré (permission
+    // refusée sur l'appareil, `PushNotificationService.registerForUser`
+    // jamais appelé, ou `fcmTokens` absent/vide sur `users/{uid}`) — plutôt
+    // qu'un problème côté envoi lui-même.
+    logger.warn(`sendPushToTokens: aucun token disponible pour "${title}" — envoi ignoré.`);
+    return;
+  }
 
   for (let i = 0; i < unique.length; i += 500) {
     const batch = unique.slice(i, i + 500);
@@ -222,17 +253,6 @@ async function getCoachTokens(): Promise<string[]> {
  * d'heure saisonnier — donc pas de gestion DST à prévoir ici. */
 const NOUMEA_TIME_ZONE = "Pacific/Noumea";
 
-/** Vrai si [date] correspond à un lundi une fois interprétée dans le fuseau
- * de Nouméa (nécessaire : le jour calendaire en UTC peut différer du jour
- * calendaire à Nouméa autour de minuit). */
-function isMondayInNoumea(date: Date): boolean {
-  const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: NOUMEA_TIME_ZONE,
-    weekday: "short",
-  }).format(date);
-  return weekday === "Mon";
-}
-
 /** Combine la date d'un créneau (minuit du jour concerné) avec son heure de
  * début ("HH:mm") en un instant précis — `slotDate` étant un `Timestamp`
  * (donc déjà un instant absolu), on lui ajoute simplement les minutes
@@ -298,40 +318,84 @@ function formatTimeShort(hhmm: string): string {
   return mm === "00" ? `${hh}h` : `${hh}h${mm}`;
 }
 
-/** "20/07 à 18h00" — date courte + heure, sans le nom du jour (contrairement
- * à `formatSlotWhen`) — utilisé pour les messages de modification, où la
- * date précise reste utile mais pas le jour de la semaine. */
-function formatDateAt(slotDate: admin.firestore.Timestamp, startTime: string): string {
+/** "lundi 20/08" — jour de la semaine + date courte (JJ/MM), utilisé dans
+ * les messages Rekovery (18 août 2026, demande de Margaux) pour préciser le
+ * jour de la semaine en plus de la date déjà affichée. */
+function weekdayShortDate(date: admin.firestore.Timestamp): string {
+  const d = date.toDate();
+  const weekday = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: NOUMEA_TIME_ZONE,
+    weekday: "long",
+  }).format(d);
   const dayMonth = new Intl.DateTimeFormat("fr-FR", {
     timeZone: NOUMEA_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
-  }).format(slotDate.toDate());
-  return `${dayMonth} à ${startTime.replace(":", "h")}`;
+  }).format(d);
+  return `${weekday} ${dayMonth}`;
 }
 
-/** Clause "au Collectif de 12h" (jour même) ou "à Collectif lundi 20/07 à
- * 12h00" (autre jour), à insérer après "Tu es inscrit.e " dans les messages
- * de confirmation de place (nouvelle place directe, promotion liste
- * d'attente, rappel 2h avant) — la date complète est inutile quand le cours
- * a lieu aujourd'hui même (26/07/2026, demande de Margaux). */
+/** "mercredi 23 août" (ou "mercredi 1er août" pour le 1ᵉʳ du mois) — jour de
+ * la semaine + date en toutes lettres, utilisé dans les messages concernant
+ * un cours (18 août 2026, demande de Margaux) — plus lisible que le JJ/MM
+ * pour ces messages-là. */
+function weekdayFullDate(date: admin.firestore.Timestamp): string {
+  const d = date.toDate();
+  const weekday = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: NOUMEA_TIME_ZONE,
+    weekday: "long",
+  }).format(d);
+  const dayNum = parseInt(
+    new Intl.DateTimeFormat("fr-FR", { timeZone: NOUMEA_TIME_ZONE, day: "numeric" }).format(d),
+    10
+  );
+  const dayLabel = dayNum === 1 ? "1er" : `${dayNum}`;
+  const month = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: NOUMEA_TIME_ZONE,
+    month: "long",
+  }).format(d);
+  return `${weekday} ${dayLabel} ${month}`;
+}
+
+/** "du mercredi 23 août" — [weekdayFullDate] précédé de "du ", pour
+ * l'insérer directement après un nom de cours ("Collectif du mercredi 23
+ * août"). */
+function weekdayFullDateDu(date: admin.firestore.Timestamp): string {
+  return `du ${weekdayFullDate(date)}`;
+}
+
+/** "d'aujourd'hui" (jour même) ou "du mercredi 23 août" (autre jour) — à
+ * insérer directement après un nom de cours (18 août 2026, demande de
+ * Margaux — remplace l'ancienne clause "de 12h"/"à ... lundi 20/07 à
+ * 12h00", voir [registeredClause]). */
+function courseDayPhrase(slotDate: admin.firestore.Timestamp): string {
+  return isTodayInNoumea(slotDate.toDate()) ? "d'aujourd'hui" : weekdayFullDateDu(slotDate);
+}
+
+/** "au Collectif d'aujourd'hui à 12h" (jour même) ou "au Collectif du
+ * mercredi 23 août à 12h" (autre jour), à insérer après "Tu es inscrit.e "
+ * dans les messages de confirmation de place (nouvelle place directe,
+ * promotion liste d'attente, rappel 2h avant) — refonte du 18 août 2026
+ * (demande de Margaux, remplace la version du 26/07/2026 qui utilisait "de
+ * 12h"/"à Collectif lundi 20/07 à 12h00"). */
 function registeredClause(
   courseTitle: string,
   slotDate: admin.firestore.Timestamp,
   startTime: string
 ): string {
-  if (isTodayInNoumea(slotDate.toDate())) {
-    return `au ${courseTitle} de ${formatTimeShort(startTime)}`;
-  }
-  return `à ${courseTitle} ${formatSlotWhen(slotDate, startTime)}`;
+  return `au ${courseTitle} ${courseDayPhrase(slotDate)} à ${formatTimeShort(startTime)}`;
 }
 
-/** "de demain 18h" ou "de 18h" (jour même, cas du lundi où l'alerte part 4h
+/** "de demain à 18h" ou "de 18h" (jour même, cas du lundi où l'alerte part 4h
  * avant plutôt que 24h) — utilisé dans le message envoyé à l'unique
- * inscrit(e) d'un créneau, voir `checkSingleRegistrantSlots`. */
+ * inscrit(e) d'un créneau, ET dans l'invitation envoyée aux autres adhérents
+ * pour qu'ils le/la rejoignent (voir `checkSingleRegistrantSlots`) — corrigé
+ * le 17 août 2026 (demande de Margaux) : la branche "demain" ne comportait
+ * pas de "à" avant l'heure ("de demain 18h" → "de demain à 18h", cohérent
+ * avec la branche jour même "de 18h"). */
 function loneRegistrantClause(slotDate: admin.firestore.Timestamp, startTime: string): string {
   const timeShort = formatTimeShort(startTime);
-  return isTodayInNoumea(slotDate.toDate()) ? `de ${timeShort}` : `de demain ${timeShort}`;
+  return isTodayInNoumea(slotDate.toDate()) ? `de ${timeShort}` : `de demain à ${timeShort}`;
 }
 
 /** "le 20/07" ou "du 20/07 au 22/07" selon que la fermeture dure un seul
@@ -755,18 +819,14 @@ export const requestRekoverySlot = onCall(
 
     const tokens = await getCoachTokens();
     // Titre/texte simplifiés (10 août 2026, demande de Margaux) — "à
-    // [heure] le [date]" plutôt que "[date] à [heure]" (`formatDateAt`,
-    // inchangée par ailleurs) : plus naturel en français pour une date
-    // ("le 12/08", pas "à 12/08").
-    const dayMonth = new Intl.DateTimeFormat("fr-FR", {
-      timeZone: NOUMEA_TIME_ZONE,
-      day: "2-digit",
-      month: "2-digit",
-    }).format(dateTimestamp.toDate());
+    // [heure] le [date]" plutôt que "[date] à [heure]" : plus naturel en
+    // français pour une date ("le 12/08", pas "à 12/08"). Jour de la
+    // semaine ajouté le 18 août 2026 (demande de Margaux, voir
+    // `weekdayShortDate`).
     await sendPushToTokens(
       tokens,
       "Nouvelle demande",
-      `${adherentName} demande un Rekovery à ${startTime.replace(":", "h")} le ${dayMonth}.`
+      `${adherentName} demande un Rekovery à ${startTime.replace(":", "h")} le ${weekdayShortDate(dateTimestamp)}.`
     );
 
     return { requestId: reqRef.id };
@@ -822,10 +882,14 @@ export const coachAcceptRekoveryRequest = onCall(
     });
 
     const tokens = await getTokensForUids([result.adherentUid], "rekoveryStatusChanged");
+    // "Ton Rekovery du {jour} {JJ/MM} à {heure}..." (18 août 2026, demande
+    // de Margaux — remplace "Ta séance Rekovery {JJ/MM} à {heure}...").
+    // Accord au masculin ("confirmé", pas "confirmée") pour rester cohérent
+    // avec "Ton" plutôt que "Ta séance".
     await sendPushToTokens(
       tokens,
       "Rekovery confirmé",
-      `Ta séance Rekovery ${formatDateAt(result.date, result.startTime)} est confirmée.`
+      `Ton Rekovery du ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} est confirmé.`
     );
 
     return { ok: true };
@@ -858,12 +922,15 @@ export const coachRefuseRekoveryRequest = onCall(
       [reqData.adherentUid as string],
       "rekoveryStatusChanged"
     );
+    // Jour de la semaine ajouté le 18 août 2026 (demande de Margaux, voir
+    // `weekdayShortDate`) — remplace la date seule (JJ/MM) de `formatDateAt`.
+    const refusedWhen = `du ${weekdayShortDate(reqData.date)} à ${(reqData.startTime as string).replace(":", "h")}`;
     await sendPushToTokens(
       tokens,
       "Demande Rekovery refusée",
       note
-        ? `Ta demande Rekovery ${formatDateAt(reqData.date, reqData.startTime)} a été refusée : ${note}`
-        : `Ta demande Rekovery ${formatDateAt(reqData.date, reqData.startTime)} a été refusée.`
+        ? `Ta demande Rekovery ${refusedWhen} a été refusée : ${note}`
+        : `Ta demande Rekovery ${refusedWhen} a été refusée.`
     );
 
     return { ok: true };
@@ -916,10 +983,12 @@ export const proposeRekoveryAlternative = onCall(
       [reqData.adherentUid as string],
       "rekoveryStatusChanged"
     );
+    // Jour de la semaine ajouté, "à la place" supprimé (18 août 2026,
+    // demande de Margaux).
     await sendPushToTokens(
       tokens,
       "Rekovery : autre créneau proposé",
-      `Le coach te propose ${formatDateAt(proposedTimestamp, proposedStartTime)} à la place.`
+      `Le coach te propose le ${weekdayShortDate(proposedTimestamp)} à ${proposedStartTime.replace(":", "h")}.`
     );
 
     return { ok: true };
@@ -998,10 +1067,11 @@ export const respondToRekoveryProposal = onCall(
 
     if (result.accepted) {
       const tokens = await getCoachTokens();
+      // Jour de la semaine ajouté le 18 août 2026 (demande de Margaux).
       await sendPushToTokens(
         tokens,
         "Rekovery confirmé",
-        `La contre-proposition ${formatDateAt(result.date, result.startTime)} a été acceptée.`
+        `La contre-proposition ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} a été acceptée.`
       );
     }
 
@@ -1145,82 +1215,16 @@ export const modifyRekoveryRequest = onCall(
     });
 
     const tokens = await getCoachTokens();
+    // Jour de la semaine ajouté le 18 août 2026 (demande de Margaux).
     await sendPushToTokens(
       tokens,
       "Demande Rekovery modifiée",
-      `${result.adherentName} a modifié sa demande : ${formatDateAt(result.date, result.startTime)}.`
+      `${result.adherentName} a modifié sa demande : ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")}.`
     );
 
     return { ok: true };
   }
 );
-
-/**
- * Génère, chaque lundi à 00h05 (heure de Nouméa), les créneaux de la semaine
- * à venir pour tous les cours collectifs récurrents (section 1.3 : créneaux
- * "fixes d'une semaine à l'autre"). Les cours duo ne sont pas concernés :
- * ils sont ajoutés ponctuellement par un coach via l'application.
- */
-export const generateWeeklySlots = onSchedule(
-  {
-    schedule: "5 0 * * 1",
-    timeZone: NOUMEA_TIME_ZONE,
-    region: REGION,
-  },
-  async () => {
-    const now = new Date();
-    const monday = mondayOf(now);
-
-    const coursesSnap = await db
-      .collection("courses")
-      .where("recurring", "==", true)
-      .get();
-
-    const batch = db.batch();
-    let created = 0;
-
-    for (const courseDoc of coursesSnap.docs) {
-      const course = courseDoc.data();
-      const dayOfWeek: number = course.recurringDayOfWeek ?? 1; // 1 = lundi
-      const slotDate = new Date(monday);
-      slotDate.setDate(monday.getDate() + (dayOfWeek - 1));
-
-      // Évite les doublons si la fonction est relancée manuellement.
-      const existing = await db
-        .collection("slots")
-        .where("courseId", "==", courseDoc.id)
-        .where("date", "==", admin.firestore.Timestamp.fromDate(slotDate))
-        .limit(1)
-        .get();
-      if (!existing.empty) continue;
-
-      const slotRef = db.collection("slots").doc();
-      batch.set(slotRef, {
-        courseId: courseDoc.id,
-        courseTitle: course.title,
-        type: "collective",
-        date: admin.firestore.Timestamp.fromDate(slotDate),
-        startTime: course.startTime,
-        endTime: course.endTime,
-        capacity: course.capacity,
-        registeredCount: 0,
-        waitlistCount: 0,
-      });
-      created++;
-    }
-
-    await batch.commit();
-    logger.info(`generateWeeklySlots : ${created} créneau(x) créé(s) pour la semaine du ${monday.toISOString()}`);
-  }
-);
-
-function mondayOf(date: Date): Date {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const day = d.getDay(); // 0 = dimanche
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + WEEK_DAYS); // semaine suivante
-  return d;
-}
 
 // ---------------------------------------------------------------------
 // Notifications push — fonctions planifiées (vérifications périodiques)
@@ -1242,11 +1246,22 @@ function scanWindow(): { start: admin.firestore.Timestamp; end: admin.firestore.
 
 /**
  * Section 1.3bis / 2.2ter : toutes les 15 minutes, repère les créneaux
- * collectifs/duo qui n'ont plus qu'un seul inscrit et dont le début approche
- * (24h avant ; 4h avant si le créneau tombe un lundi), et invite tous les
- * adhérents de la même formule (sauf l'unique inscrit actuel) à rejoindre le
- * cours, sans quoi il sera annulé. N'alerte qu'une seule fois par créneau
- * (`singleRegistrantAlertSent`).
+ * collectifs/duo qui n'ont plus qu'un seul inscrit.
+ *
+ * Refonte du 18 août 2026 (demande de Margaux) — les 2 messages, jusque là
+ * envoyés ENSEMBLE à un seul et même seuil (24h avant, 4h avant si lundi),
+ * ont désormais chacun leur propre logique, avec leur propre indicateur
+ * Firestore (fini `singleRegistrantAlertSent`, unique jusqu'ici) :
+ * - "Tu es seul.e" (à l'unique inscrit(e)) : fenêtre FIXE de 24h, SANS
+ *   exception le lundi (Margaux : "si une personne est ou devient seule
+ *   dans les 24h qui précèdent sa séance, elle doit être prévenue
+ *   instantanément") — un seul envoi (`soloAlertSent`).
+ * - "Un binôme te cherche." (aux autres adhérents de la même formule) :
+ *   DEUX envois désormais, un à 24h avant (texte inchangé,
+ *   `binome24hAlertSent`) ET un autre à 4h avant, pour relancer une
+ *   dernière fois avant que le cours ne soit compromis
+ *   (`binome4hAlertSent`, texte légèrement différent — voir
+ *   [courseDayPhrase]). Les deux envois sont indépendants l'un de l'autre.
  */
 export const checkSingleRegistrantSlots = onSchedule(
   { schedule: "*/15 * * * *", region: REGION },
@@ -1265,14 +1280,16 @@ export const checkSingleRegistrantSlots = onSchedule(
       const formula = FORMULA_BY_SLOT_TYPE[slot.type as string];
       if (!formula) continue; // ni collectif ni duo
       if ((slot.registeredCount ?? 0) !== 1) continue;
-      if (slot.singleRegistrantAlertSent) continue;
+
+      const needsSolo = !slot.soloAlertSent;
+      const needsBinome24h = !slot.binome24hAlertSent;
+      const needsBinome4h = !slot.binome4hAlertSent;
+      if (!needsSolo && !needsBinome24h && !needsBinome4h) continue; // tout déjà envoyé
 
       const startInstant = slotStartInstant(slot.date, slot.startTime);
       const hoursUntilStart = (startInstant.getTime() - now) / (60 * 60 * 1000);
       if (hoursUntilStart <= 0) continue; // déjà commencé/passé
-
-      const threshold = isMondayInNoumea(slot.date.toDate()) ? 4 : 24;
-      if (hoursUntilStart > threshold) continue; // pas encore dans la fenêtre
+      if (hoursUntilStart > 24) continue; // trop tôt pour tout le monde
 
       try {
         const currentRegistrant = await db
@@ -1282,31 +1299,112 @@ export const checkSingleRegistrantSlots = onSchedule(
           .limit(1)
           .get();
         const excludeUids = currentRegistrant.docs.map((d) => d.data().userId as string);
+        const updates: Record<string, boolean> = {};
 
-        // Message à l'unique inscrit(e) lui/elle-même : le prévient qu'il/elle
-        // risque de se retrouver sans cours si personne ne le rejoint (26
-        // juillet 2026, demande de Margaux — jusqu'ici seuls les AUTRES
-        // adhérents étaient notifiés, jamais l'inscrit(e) lui/elle-même).
-        if (excludeUids.length > 0) {
-          const soloTokens = await getTokensForUids(excludeUids, "singleRegistrantAlert");
-          await sendPushToTokens(
-            soloTokens,
-            "Tu es seul.e",
-            `Tu es seul.e au ${slot.courseTitle} ${loneRegistrantClause(slot.date, slot.startTime)}.`
-          );
+        // "Tu es seul.e" : prévient l'unique inscrit(e) qu'il/elle risque de
+        // se retrouver sans cours si personne ne le rejoint (26 juillet
+        // 2026, demande de Margaux). Fenêtre fixe 24h depuis le 18 août
+        // 2026 (plus d'exception le lundi).
+        if (needsSolo) {
+          if (excludeUids.length > 0) {
+            const soloTokens = await getTokensForUids(excludeUids, "singleRegistrantAlert");
+            await sendPushToTokens(
+              soloTokens,
+              "Tu es seul.e",
+              `Tu es seul.e au ${slot.courseTitle} ${loneRegistrantClause(slot.date, slot.startTime)}.`
+            );
+          }
+          updates.soloAlertSent = true;
         }
 
-        // Message aux autres adhérents de la même formule : invitation à
-        // rejoindre le cours pour qu'il ne soit pas annulé.
-        const tokens = await getTokensForFormula(formula, excludeUids, "singleRegistrantAlert");
-        await sendPushToTokens(
-          tokens,
-          "Un binôme te cherche.",
-          `Le cours ${slot.courseTitle}, n'a qu'un seul inscrit. Rejoins-le!`
-        );
-        await doc.ref.update({ singleRegistrantAlertSent: true });
+        // "Un binôme te cherche." : invitation aux autres adhérents de la
+        // même formule à rejoindre le cours pour qu'il ne soit pas annulé —
+        // envoyée à 24h (texte inchangé depuis le 17 août 2026) PUIS à
+        // nouveau à 4h (texte avec [courseDayPhrase], plus adapté à
+        // l'urgence proche — voir doc de fonction).
+        if (needsBinome24h) {
+          const tokens = await getTokensForFormula(formula, excludeUids, "singleRegistrantAlert");
+          await sendPushToTokens(
+            tokens,
+            "Un binôme te cherche.",
+            `Le cours ${slot.courseTitle} ${loneRegistrantClause(slot.date, slot.startTime)} n'a qu'un seul inscrit. Rejoins-le !`
+          );
+          updates.binome24hAlertSent = true;
+        }
+        if (needsBinome4h && hoursUntilStart <= 4) {
+          const tokens = await getTokensForFormula(formula, excludeUids, "singleRegistrantAlert");
+          await sendPushToTokens(
+            tokens,
+            "Un binôme te cherche.",
+            `Le cours ${slot.courseTitle} ${courseDayPhrase(slot.date)} à ${formatTimeShort(slot.startTime)} n'a qu'un seul inscrit. Rejoins-le !`
+          );
+          updates.binome4hAlertSent = true;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await doc.ref.update(updates);
+        }
       } catch (err) {
         logger.error(`checkSingleRegistrantSlots: échec pour le créneau ${doc.id}`, err);
+      }
+    }
+  }
+);
+
+/**
+ * Section 1.3bis / 2.2ter (côté coach cette fois) : toutes les 15 minutes,
+ * repère les créneaux collectifs/duo qui ont MOINS DE 2 inscrits (0 ou 1) et
+ * dont le début approche dans moins de 4h, et alerte les coachs — pour
+ * qu'ils puissent relancer ou décider d'une annulation avant qu'il ne soit
+ * trop tard (17 août 2026, demande de Margaux : "les coachs doivent être
+ * prévenus 4h avant quand un cours a moins de 2 inscrits"). Titre "Manque
+ * de monde" (renommé le 18 août 2026, remplace "Créneau peu rempli"). Seuil
+ * FIXE de 4h (pas d'exception le lundi ici, contrairement à
+ * `checkSingleRegistrantSlots` qui vise les ADHÉRENTS) — indicateur dédié
+ * (`coachLowRegistrationAlertSent`) pour ne se déclencher qu'une fois par
+ * créneau, indépendant des indicateurs de `checkSingleRegistrantSlots`.
+ */
+export const checkLowRegistrationSlotsForCoach = onSchedule(
+  { schedule: "*/15 * * * *", region: REGION },
+  async () => {
+    const { start, end } = scanWindow();
+    const snap = await db
+      .collection("slots")
+      .where("date", ">=", start)
+      .where("date", "<=", end)
+      .get();
+
+    const now = Date.now();
+
+    for (const doc of snap.docs) {
+      const slot = doc.data();
+      if (!FORMULA_BY_SLOT_TYPE[slot.type as string]) continue; // ni collectif ni duo
+      const registeredCount = slot.registeredCount ?? 0;
+      if (registeredCount >= 2) continue;
+      if (slot.coachLowRegistrationAlertSent) continue;
+
+      const startInstant = slotStartInstant(slot.date, slot.startTime);
+      const hoursUntilStart = (startInstant.getTime() - now) / (60 * 60 * 1000);
+      if (hoursUntilStart <= 0) continue; // déjà commencé/passé
+      if (hoursUntilStart > 4) continue; // pas encore dans la fenêtre des 4h
+
+      try {
+        const tokens = await getCoachTokens();
+        const registrationClause =
+          registeredCount === 0 ? "n'a personne d'inscrit" : "n'a qu'un seul inscrit";
+        // Titre renommé "Manque de monde" le 18 août 2026 (demande de
+        // Margaux — remplace "Créneau peu rempli").
+        await sendPushToTokens(
+          tokens,
+          "Manque de monde",
+          `Le cours ${slot.courseTitle} ${formatSlotWhen(slot.date, slot.startTime)} ${registrationClause}.`
+        );
+        await doc.ref.update({ coachLowRegistrationAlertSent: true });
+      } catch (err) {
+        logger.error(
+          `checkLowRegistrationSlotsForCoach: échec pour le créneau ${doc.id}`,
+          err
+        );
       }
     }
   }
@@ -1521,6 +1619,108 @@ export const onRegistrationUpdated = onDocumentUpdated(
   }
 );
 
+/**
+ * Toutes les 15 minutes, en plus de l'alerte INSTANTANÉE de
+ * [checkSameDayDoubleBooking] : rappelle une seconde fois, 24h avant le
+ * PREMIER des cours de la journée concernée, à tout adhérent ayant plusieurs
+ * inscriptions confirmées le même jour calendaire (18 août 2026, demande de
+ * Margaux : "Double inscription doit poper instantanément ET 24h avant le
+ * premier cours de la journée"). N'envoie qu'une seule fois par (adhérent,
+ * jour) — indicateur `doubleBookingReminderSent` posé sur l'inscription du
+ * PREMIER cours de ce jour-là pour cet adhérent (pas sur le jour en tant
+ * que tel, qui n'a pas de document dédié).
+ */
+export const checkSameDayDoubleBookingReminders = onSchedule(
+  { schedule: "*/15 * * * *", region: REGION },
+  async () => {
+    const { start, end } = scanWindow();
+    const slotsSnap = await db
+      .collection("slots")
+      .where("date", ">=", start)
+      .where("date", "<=", end)
+      .get();
+    if (slotsSnap.empty) return;
+
+    // Regroupe les créneaux par jour calendaire exact (même principe que
+    // [checkSameDayDoubleBooking] : le champ `date` est toujours minuit
+    // local, donc une égalité de `Timestamp` suffit à identifier "le même
+    // jour").
+    const slotsByDay = new Map<number, admin.firestore.QueryDocumentSnapshot[]>();
+    for (const doc of slotsSnap.docs) {
+      const key = (doc.data().date as admin.firestore.Timestamp).toMillis();
+      const list = slotsByDay.get(key) ?? [];
+      list.push(doc);
+      slotsByDay.set(key, list);
+    }
+
+    const now = Date.now();
+
+    for (const daySlots of slotsByDay.values()) {
+      if (daySlots.length < 2) continue; // un seul créneau ce jour-là : pas de double inscription possible
+      const slotById = new Map(daySlots.map((d) => [d.id, d]));
+
+      // Toutes les inscriptions CONFIRMÉES sur les créneaux de ce jour (par
+      // lots de 30, limite Firestore de `documentId() in`/`in` — un seul
+      // jour compte très largement moins de créneaux que ça en pratique).
+      const regs: admin.firestore.QueryDocumentSnapshot[] = [];
+      const slotIds = daySlots.map((d) => d.id);
+      for (let i = 0; i < slotIds.length; i += 30) {
+        const chunk = slotIds.slice(i, i + 30);
+        const snap = await db
+          .collection("registrations")
+          .where("slotId", "in", chunk)
+          .where("status", "==", "confirmed")
+          .get();
+        regs.push(...snap.docs);
+      }
+
+      const regsByUser = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
+      for (const r of regs) {
+        const uid = r.data().userId as string;
+        const list = regsByUser.get(uid) ?? [];
+        list.push(r);
+        regsByUser.set(uid, list);
+      }
+
+      for (const [uid, userRegs] of regsByUser) {
+        if (userRegs.length < 2) continue; // pas de double inscription pour cet adhérent ce jour-là
+
+        // Le PREMIER cours de la journée pour cet adhérent (comparaison
+        // lexicale de "HH:mm", valide car toujours sur 2 chiffres).
+        let earliestReg = userRegs[0];
+        let earliestSlot = slotById.get(userRegs[0].data().slotId as string)!;
+        for (const r of userRegs.slice(1)) {
+          const s = slotById.get(r.data().slotId as string)!;
+          if ((s.data().startTime as string) < (earliestSlot.data().startTime as string)) {
+            earliestReg = r;
+            earliestSlot = s;
+          }
+        }
+        if (earliestReg.data().doubleBookingReminderSent) continue;
+
+        const startInstant = slotStartInstant(
+          earliestSlot.data().date as admin.firestore.Timestamp,
+          earliestSlot.data().startTime as string
+        );
+        const hoursUntilStart = (startInstant.getTime() - now) / (60 * 60 * 1000);
+        if (hoursUntilStart <= 0 || hoursUntilStart > 24) continue;
+
+        try {
+          const tokens = await getTokensForUids([uid], "sameDayDoubleBooking");
+          await sendPushToTokens(
+            tokens,
+            "Double inscription",
+            `Tu es inscrit.e à ${userRegs.length} cours ${formatDayOnly(earliestSlot.data().date as admin.firestore.Timestamp)}.`
+          );
+          await earliestReg.ref.update({ doubleBookingReminderSent: true });
+        } catch (err) {
+          logger.error(`checkSameDayDoubleBookingReminders: échec pour ${uid}`, err);
+        }
+      }
+    }
+  }
+);
+
 /** Nouveau workshop : notifie tout le monde (coachs + adhérents actifs). */
 export const onSlotCreated = onDocumentCreated(
   { document: "slots/{slotId}", region: REGION },
@@ -1566,10 +1766,17 @@ export const onSlotUpdated = onDocumentUpdated(
       if (after.type === "duo" || after.type === "individual") {
         const uids = await affectedAdherentUids(event.params.slotId, after);
         const tokens = await getTokensForUids(uids, "duoIndividualChanged");
+        // Refonte du 18 août 2026 (demande de Margaux) — "Ta séance" → "Ton
+        // cours" (accord au masculin, "modifié" pas "modifiée"), jour de la
+        // semaine ajouté à l'ancien créneau, ET précision du NOUVEAU
+        // créneau (avant, seule l'ancienne date/heure était donnée — pas de
+        // quoi savoir quand se replacer).
+        const oldWhen = `${weekdayShortDate(before.date)} à ${(before.startTime as string).replace(":", "h")}`;
+        const newWhen = `${weekdayFullDate(after.date)} à ${formatTimeShort(after.startTime)}`;
         await sendPushToTokens(
           tokens,
           "Ton cours a changé",
-          `Ta séance ${after.courseTitle} du ${formatDateAt(after.date, after.startTime)} a été modifiée.`
+          `Ton cours ${after.courseTitle} du ${oldWhen} a été modifié. Nouveau créneau : ${newWhen}.`
         );
       }
     } catch (err) {
@@ -1591,10 +1798,11 @@ export const onSlotDeleted = onDocumentDeleted(
     try {
       const uids = await affectedAdherentUids(event.params.slotId, data);
       const tokens = await getTokensForUids(uids, "duoIndividualChanged");
+      // "Ton cours" ajouté le 18 août 2026 (demande de Margaux).
       await sendPushToTokens(
         tokens,
         "Cours annulé",
-        `${data.courseTitle} du ${formatSlotWhen(data.date, data.startTime)} a été annulé.`
+        `Ton cours ${data.courseTitle} du ${formatSlotWhen(data.date, data.startTime)} a été annulé.`
       );
     } catch (err) {
       logger.error(`onSlotDeleted: échec pour ${event.params.slotId}`, err);
