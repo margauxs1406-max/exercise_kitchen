@@ -72,16 +72,26 @@ String _fmtDateTime(DateTime date, String startTime) {
 /// autres adhérents, ou un statut `refused`/`cancelled`, restent en
 /// couleurs neutres.
 ///
-/// Un appui simple (tap) ne fait rien : seul un appui long ([onLongPress])
-/// ouvre les actions disponibles pour ce statut et ce rôle — voir
-/// `rekovery_request_actions_sheet.dart` (adhérent) et
-/// `coach_rekovery_actions_sheet.dart` (coach). Ce changement (6 août 2026)
-/// évite qu'un simple tap déclenche accidentellement une annulation.
+/// Comportement du tap/appui long selon l'écran (12 août 2026, voir
+/// [onTap]) :
+/// - Adhérent : un tap simple ne fait rien, seul un appui long
+///   ([onLongPress]) ouvre les actions disponibles (voir
+///   `rekovery_request_actions_sheet.dart`) — comportement inchangé depuis
+///   le 6 août 2026, pour éviter qu'un simple tap déclenche
+///   accidentellement une annulation.
+/// - Coach : un tap SIMPLE ([onTap]) ouvre directement le choix
+///   "accepter/refuser/proposer" (voir `coach_rekovery_actions_sheet.dart`)
+///   — changé le 12 août 2026 à la demande de Margaux (l'appui long
+///   n'était pas assez découvrable) ; contrairement à l'adhérent, le coach
+///   n'a pas de risque de désinscription accidentelle ici (accepter/
+///   refuser/proposer ne sont pas des actions "irréversibles en un tap",
+///   chacune ouvre elle-même sa propre confirmation/pop-up).
 class RekoveryRequestCard extends StatelessWidget {
   final RekoveryRequestModel request;
   final bool showName;
   final bool isOwn;
   final bool colorByStatus;
+  final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
   const RekoveryRequestCard({
@@ -90,6 +100,7 @@ class RekoveryRequestCard extends StatelessWidget {
     this.showName = false,
     this.isOwn = true,
     this.colorByStatus = false,
+    this.onTap,
     this.onLongPress,
   });
 
@@ -171,6 +182,7 @@ class RekoveryRequestCard extends StatelessWidget {
             ],
           ),
         ),
+        onTap: onTap,
         onLongPress: onLongPress,
       ),
     );

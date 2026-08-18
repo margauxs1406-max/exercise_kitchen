@@ -99,10 +99,10 @@ class CoachRekoveryScreen extends StatelessWidget {
               return RekoveryRequestCard(
                 request: request,
                 showName: true,
-                // Appui long uniquement (6 août 2026) : un simple tap ne
-                // déclenche plus les actions, pour éviter une annulation
-                // accidentelle.
-                onLongPress: canAct ? () => showCoachRekoveryActionsSheet(context, request) : null,
+                // Tap simple (12 août 2026, demande de Margaux — remplace
+                // l'appui long du 6 août 2026, pas assez découvrable) :
+                // ouvre directement le choix accepter/refuser/proposer.
+                onTap: canAct ? () => showCoachRekoveryActionsSheet(context, request) : null,
               );
             },
           );

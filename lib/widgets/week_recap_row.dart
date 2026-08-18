@@ -75,11 +75,30 @@ enum DayRecapStatus { waitlisted, confirmed }
 /// exactement 5 éléments (index 0 = lundi … index 4 = vendredi) ; pour
 /// chaque jour, [dayFormulaStatuses] doit avoir une entrée pour CHAQUE
 /// formule de [dayFormulas] à cet index (une formule présente a toujours
-/// un statut). Le calcul lui-même vit dans `_WeekRecapLoader`
+/// un statut). [dayFormulaCounts] (18 août 2026, demande de Margaux) : même
+/// contrainte, nombre d'occurrences de chaque formule ce jour-là (voir
+/// [_MiniIconWithBadge]) — un petit badge apparaît sur l'icône dès que ce
+/// nombre atteint 2, pour distinguer 2 cours de la même formule le même
+/// jour d'une seule inscription (le carré reste malgré tout 1 seule icône
+/// par formule, voir la doc de [_DaySquare]).
+///
+/// [dayFormulaAtRisk] (18 août 2026, demande de Margaux) : même contrainte
+/// que [dayFormulaCounts] — vrai pour une formule/jour donné si l'adhérent
+/// est l'unique inscrit(e) confirmé(e) d'au moins UN créneau collectif/duo
+/// de cette formule ce jour-là (risque d'annulation faute de binôme, même
+/// logique que [SlotCard] pour la carte du créneau lui-même — voir
+/// `slot_card.dart`). Quand c'est vrai, la couleur habituelle du statut
+/// (vert/moutarde) est remplacée par le rouge vif de l'alerte
+/// (`AppColors.flashyRed`), qu'il s'agisse d'un carré uniforme ou d'un
+/// triangle dans un carré à plusieurs occurrences — voir [_DaySquare].
+///
+/// Le calcul de ces 4 listes vit dans `_WeekRecapLoader`
 /// (`weekly_planning_screen.dart`), ce widget ne fait qu'afficher.
 class WeekRecapRow extends StatelessWidget {
   final List<Set<String>> dayFormulas;
   final List<Map<String, DayRecapStatus>> dayFormulaStatuses;
+  final List<Map<String, int>> dayFormulaCounts;
+  final List<Map<String, bool>> dayFormulaAtRisk;
 
   // Initiales des 5 jours (lundi à vendredi), affichées au-dessus de chaque
   // carré. "Mardi" et "Mercredi" partagent la même initiale ("M") — sans
@@ -87,10 +106,19 @@ class WeekRecapRow extends StatelessWidget {
   // sens, exactement comme sur la maquette fournie par Margaux.
   static const _dayLetters = ['L', 'M', 'M', 'J', 'V'];
 
-  const WeekRecapRow({super.key, required this.dayFormulas, required this.dayFormulaStatuses})
-      : assert(dayFormulas.length == 5, 'dayFormulas doit contenir exactement 5 jours (lun-ven)'),
+  const WeekRecapRow({
+    super.key,
+    required this.dayFormulas,
+    required this.dayFormulaStatuses,
+    required this.dayFormulaCounts,
+    required this.dayFormulaAtRisk,
+  })  : assert(dayFormulas.length == 5, 'dayFormulas doit contenir exactement 5 jours (lun-ven)'),
         assert(dayFormulaStatuses.length == 5,
-            'dayFormulaStatuses doit contenir exactement 5 jours (lun-ven)');
+            'dayFormulaStatuses doit contenir exactement 5 jours (lun-ven)'),
+        assert(dayFormulaCounts.length == 5,
+            'dayFormulaCounts doit contenir exactement 5 jours (lun-ven)'),
+        assert(dayFormulaAtRisk.length == 5,
+            'dayFormulaAtRisk doit contenir exactement 5 jours (lun-ven)');
 
   @override
   Widget build(BuildContext context) {
@@ -110,7 +138,12 @@ class WeekRecapRow extends StatelessWidget {
               children: [
                 Text(_dayLetters[i], style: dayLetterStyle),
                 SizedBox(height: context.hp(4)),
-                _DaySquare(formulas: dayFormulas[i], statuses: dayFormulaStatuses[i]),
+                _DaySquare(
+                  formulas: dayFormulas[i],
+                  statuses: dayFormulaStatuses[i],
+                  counts: dayFormulaCounts[i],
+                  atRisk: dayFormulaAtRisk[i],
+                ),
               ],
             ),
           ],
@@ -123,17 +156,31 @@ class WeekRecapRow extends StatelessWidget {
 class _DaySquare extends StatelessWidget {
   final Set<String> formulas;
   final Map<String, DayRecapStatus> statuses;
-  const _DaySquare({required this.formulas, required this.statuses});
+  final Map<String, int> counts;
+  final Map<String, bool> atRisk;
+  const _DaySquare({
+    required this.formulas,
+    required this.statuses,
+    required this.counts,
+    required this.atRisk,
+  });
 
-  static Color _colorFor(DayRecapStatus status) => switch (status) {
-        // Vert flashy — remplace l'orange le 10 août 2026 (confusion avec
-        // les CTA "S'inscrire"/"File d'attente" du planning).
-        DayRecapStatus.confirmed => AppColors.flashyGreen,
-        // Moutarde (10 août 2026, demande de Margaux) — déjà la couleur du
-        // statut "En attente" ailleurs dans l'app, voir
-        // `AppColors.mustardYellow`.
-        DayRecapStatus.waitlisted => AppColors.mustardYellow,
-      };
+  /// [isAtRisk] (18 août 2026, demande de Margaux) prime sur le statut :
+  /// rouge vif dès que l'adhérent est l'unique inscrit(e) confirmé(e) d'un
+  /// créneau de cette formule ce jour-là, qu'il soit par ailleurs confirmé
+  /// ou en attente (voir la doc de classe de [WeekRecapRow]).
+  static Color _colorFor(DayRecapStatus status, bool isAtRisk) {
+    if (isAtRisk) return AppColors.flashyRed;
+    return switch (status) {
+      // Vert flashy — remplace l'orange le 10 août 2026 (confusion avec
+      // les CTA "S'inscrire"/"File d'attente" du planning).
+      DayRecapStatus.confirmed => AppColors.flashyGreen,
+      // Moutarde (10 août 2026, demande de Margaux) — déjà la couleur du
+      // statut "En attente" ailleurs dans l'app, voir
+      // `AppColors.mustardYellow`.
+      DayRecapStatus.waitlisted => AppColors.mustardYellow,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -164,9 +211,16 @@ class _DaySquare extends StatelessWidget {
     // taille d'icône d'origine (20) déborderait de son triangle.
     final iconSize = orderedFormulas.length >= 3 ? context.wp(14) : context.wp(20);
     final icons = [
-      for (final f in orderedFormulas) _FormulaMiniIcon(formula: f, size: iconSize),
+      for (final f in orderedFormulas)
+        _MiniIconWithBadge(
+          icon: _FormulaMiniIcon(formula: f, size: iconSize),
+          count: counts[f] ?? 1,
+          iconSize: iconSize,
+        ),
     ];
-    final iconColors = [for (final f in orderedFormulas) _colorFor(statuses[f]!)];
+    final iconColors = [
+      for (final f in orderedFormulas) _colorFor(statuses[f]!, atRisk[f] ?? false),
+    ];
 
     if (icons.length == 1) {
       // Une seule occurrence : carré uniforme, pas de diagonale à tracer
@@ -419,6 +473,66 @@ class _DiagonalIcons extends StatelessWidget {
       children: [
         for (var i = 0; i < icons.length; i++) Align(alignment: alignments[i], child: icons[i]),
       ],
+    );
+  }
+}
+
+/// Superpose un petit badge numéroté (18 août 2026, demande de Margaux) sur
+/// [icon] quand [count] est 2 ou plus — pour distinguer visuellement 2
+/// cours de la MÊME formule le même jour (ex. 2 séances "Collectif") d'une
+/// seule inscription, sans pour autant faire apparaître une 2ᵉ icône : le
+/// carré garde toujours exactement 1 icône par formule (voir la doc de
+/// classe de [WeekRecapRow]), seul ce badge change.
+///
+/// Badge positionné en bas-droite de l'icône, cercle sombre/texte blanc
+/// (même contraste sur fond vert flashy que moutarde). Taille du badge
+/// proportionnelle à [iconSize] plutôt que fixe, pour rester cohérente
+/// entre le cas normal (icônes à 20) et le cas à 3 occurrences (icônes
+/// réduites à 14, voir `_DaySquare.build`). Le badge reste ENTIÈREMENT
+/// dans les limites de la `SizedBox` de l'icône (pas de débordement en
+/// dehors) — volontaire, pour ne jamais risquer d'être coupé par le
+/// `clipBehavior: Clip.antiAlias` du carré parent (voir `_DaySquare`),
+/// notamment pour l'icône positionnée pile dans un coin arrondi du carré.
+class _MiniIconWithBadge extends StatelessWidget {
+  final Widget icon;
+  final int count;
+  final double iconSize;
+  const _MiniIconWithBadge({required this.icon, required this.count, required this.iconSize});
+
+  @override
+  Widget build(BuildContext context) {
+    if (count < 2) return icon;
+    final badgeSize = iconSize * 0.58;
+    return SizedBox(
+      width: iconSize,
+      height: iconSize,
+      child: Stack(
+        children: [
+          icon,
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: badgeSize,
+              height: badgeSize,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: AppColors.black,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: AppColors.white,
+                  fontSize: badgeSize * 0.62,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

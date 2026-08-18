@@ -12,13 +12,36 @@ class AppColors {
   static const Color lightGrey = Color(0xFFF2F2F2); // Fonds de sections, cartes
   static const Color mediumGrey = Color(0xFF8C8C8C); // Textes secondaires, bordures
   static const Color orange = Color(0xFFFF6B35); // CTA, badges, alertes importantes
+  // Couleur exacte fournie par Margaux le 10 août 2026 (remplace
+  // 0xFF41D952, très proche) — Statut "Actif" (texte + coche), icônes
+  // "confirmé" pleines (carrés du récap, avatars `SlotCard`/
+  // `RekoveryRequestCard`).
   static const Color flashyGreen = Color(0xFF41C450);
   static const Color mustardYellow = Color(0xFFCFB93B); // Statut "En attente" (texte + icône)
-  static const Color darkGrey = Color(0xFF5C5C5C);
-  static const Color recapEmptyGrey = Color(0xFFDDDCDC); 
+  static const Color darkGrey = Color(0xFF5C5C5C); // Statut "Clôturé" (texte + croix), sans fond ni contour
+  // Couleurs "claires" ajoutées le 10 août 2026 (demande de Margaux) :
+  // fonds de carte plus doux que la couleur pleine (réservée à l'icône ou
+  // au carré du récap lui-même, statut "confirmé"). Valeurs RVB EXACTES
+  // fournies par Margaux — ne pas les recalculer via `withValues`
+  // (`lightMustard`/`lightOrange` avaient un temps été dérivées de
+  // `mustardYellow`/`orange` par transparence, avant que Margaux ne
+  // fournisse ces valeurs fixes le même jour). Ajustées une seconde fois
+  // (légèrement) par Margaux directement dans le code, le même jour.
+  static const Color recapEmptyGrey = Color(0xFFDDDCDC); // Carré "vide" du récap de semaine adhérent
+  // "Inscrit"/"confirmé" (adhérent), ET "Individuel" (coach, depuis le 10
+  // août 2026 — remplace le moutarde utilisé un temps).
   static const Color lightGreen = Color(0xFFD9F3DC);
   static const Color lightMustard = Color(0xFFF5F1D8); // "En attente" (adhérent)
   static const Color lightOrange = Color(0xFFFFE0D0); // "Duo" (coach)
+  // Ajoutées le 18 août 2026 (demande de Margaux, valeurs RVB exactes
+  // fournies par elle — ne pas recalculer via `withValues`) : créneau
+  // collectif/duo à moins de 2 inscrits à moins de 4h du début (voir
+  // `SlotCard._isAtRiskOfCancellation`) — même seuil que l'alerte coach
+  // côté serveur (`checkLowRegistrationSlotsForCoach`,
+  // `functions/src/index.ts`), mais ce rouge est un signal visuel
+  // IMMÉDIAT dans le planning, distinct du push envoyé une seule fois.
+  static const Color lightRed = Color(0xFFFECCCC); // Fond de carte "risque d'annulation"
+  static const Color flashyRed = Color(0xFFF80101); // Icône + nombre d'inscrits, même cas
 }
 
 class AppTheme {

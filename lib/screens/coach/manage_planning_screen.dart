@@ -44,7 +44,19 @@ class ManagePlanningScreen extends StatefulWidget {
   State<ManagePlanningScreen> createState() => _ManagePlanningScreenState();
 }
 
-class _ManagePlanningScreenState extends State<ManagePlanningScreen> {
+/// [WidgetsBindingObserver] ajouté le 17 août 2026 (bug corrigé, demande de
+/// Margaux) : `CoachHomeScreen` garde cet écran vivant en permanence via un
+/// `IndexedStack` (voir sa doc), donc `initState`/`_weekStart` ne se
+/// réinitialisent JAMAIS tout seuls tant que le coach reste connecté. Si un
+/// coach navigue vers une semaine future (ex. 24/08) pour la consulter, puis
+/// laisse l'app en arrière-plan (sans se déconnecter) au lieu de revenir
+/// manuellement à la semaine en cours, il retrouvait cette même semaine
+/// future affichée par défaut à chaque réouverture de l'app — parfois
+/// plusieurs jours après. `didChangeAppLifecycleState` resynchronise
+/// désormais `_weekStart` sur la semaine courante à chaque retour au premier
+/// plan ([AppLifecycleState.resumed]).
+class _ManagePlanningScreenState extends State<ManagePlanningScreen>
+    with WidgetsBindingObserver {
   late DateTime _weekStart = mondayOf(DateTime.now());
 
   static DateTime _dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -64,6 +76,7 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Génère les créneaux collectifs de la semaine courante et des
     // semaines suivantes, pour que les adhérents puissent consulter et
     // s'inscrire à l'avance sans attendre qu'un coach ait ouvert chacune
@@ -77,6 +90,32 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen> {
     // sont pas générés.
     _ensureSlotsAhead();
     _ensureWeekTypesAhead();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Voir la doc de la classe : resynchronise la semaine affichée sur la
+    // semaine en cours à chaque retour au premier plan, pour qu'un coach ne
+    // retrouve jamais une semaine future affichée "par défaut" simplement
+    // parce qu'il l'avait consultée avant de mettre l'app en arrière-plan.
+    if (state == AppLifecycleState.resumed) {
+      _resyncToCurrentWeekIfStale();
+    }
+  }
+
+  void _resyncToCurrentWeekIfStale() {
+    final currentWeek = mondayOf(DateTime.now());
+    if (currentWeek != _weekStart) {
+      setState(() => _weekStart = currentWeek);
+      _ensureSlotsAhead();
+      _ensureWeekTypesAhead();
+    }
   }
 
   Future<void> _ensureSlotsAhead() async {

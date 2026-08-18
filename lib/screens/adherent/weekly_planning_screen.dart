@@ -143,19 +143,36 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
     required RegistrationModel myRegistration,
   }) async {
     final isWaitlisted = myRegistration.status == RegistrationStatus.waitlisted;
+    // Avertissement renforcé (18 août 2026, demande de Margaux) : si cette
+    // désinscription fait tomber le nombre d'inscrits CONFIRMÉS de 2 à 1
+    // (le cours risque alors l'annulation — mêmes seuils que l'alerte
+    // serveur, voir `checkSingleRegistrantSlots` dans
+    // `functions/src/index.ts`), le titre/texte de la pop-up change pour le
+    // signaler explicitement. Ne s'applique qu'à une place CONFIRMÉE
+    // (`registeredCount` ne bouge pas quand quelqu'un quitte la liste
+    // d'attente) et seulement quand il reste exactement 2 inscrits
+    // confirmés avant cette désinscription. Mêmes boutons
+    // "Annuler"/"Se désinscrire" que la pop-up habituelle — ce texte la
+    // REMPLACE, il ne s'ajoute pas en plus.
+    final risksCancellation = !isWaitlisted && slot.registeredCount == 2;
+
+    final title = risksCancellation ? 'ATTENTION' : 'SE DÉSINSCRIRE ?';
+    final message = risksCancellation
+        ? "Le cours n'aura plus qu'un seul inscrit et risque d'être annulé, "
+            "es-tu sûre de vouloir te désinscrire ?"
+        : (isWaitlisted
+            ? 'Tu quitteras la liste d\'attente de « ${slot.courseTitle} » '
+                '(${slot.startTime}–${slot.endTime}).'
+            : 'Ta place pour « ${slot.courseTitle} » (${slot.startTime}–${slot.endTime}) '
+                'sera libérée.');
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.white,
         surfaceTintColor: Colors.transparent,
-        title: const Text('SE DÉSINSCRIRE ?'),
-        content: Text(
-          isWaitlisted
-              ? 'Tu quitteras la liste d\'attente de « ${slot.courseTitle} » '
-                  '(${slot.startTime}–${slot.endTime}).'
-              : 'Ta place pour « ${slot.courseTitle} » (${slot.startTime}–${slot.endTime}) '
-                  'sera libérée.',
-        ),
+        title: Text(title),
+        content: Text(message),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
           FilledButton(
@@ -397,40 +414,48 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                                           ),
                                   trailing: !showRegisterButton
                                       ? null
-                                      : SizedBox(
-                                          // Largeur variable selon le libellé
-                                          // affiché : pendant le chargement
-                                          // et une fois inscrit/en attente
-                                          // ("Inscrit.e"/"En attente" + icône),
-                                          // on garde 112 (jamais posé
-                                          // problème) ; avant inscription,
-                                          // "S'inscrire" (court) obtient une
-                                          // largeur réduite et "File
-                                          // d'attente" (plus long) une
-                                          // largeur augmentée, plutôt qu'une
-                                          // seule largeur fixe pour les deux.
-                                          width: (!isPending && myReg == null)
-                                              ? (slot.isFull ? context.wp(138) : context.wp(96))
-                                              : context.wp(112),
-                                          child: isPending
-                                              ? Center(
-                                                  child: SizedBox(
-                                                    height: context.hp(20),
-                                                    width: context.wp(20),
-                                                    child: const CircularProgressIndicator(
-                                                        strokeWidth: 2),
-                                                  ),
-                                                )
-                                              : _RegistrationButton(
-                                                  registration: myReg,
-                                                  full: slot.isFull,
-                                                  onPressed: () => _toggleRegistration(
-                                                    regRepo: regRepo,
-                                                    slot: slot,
-                                                    myRegistration: myReg,
-                                                  ),
+                                      // Plus de largeur FIXE en dur ici (17
+                                      // août 2026, bug corrigé, demande de
+                                      // Margaux) : sur les petits téléphones,
+                                      // `context.wp(...)` rétrécit
+                                      // proportionnellement à la largeur
+                                      // d'écran SANS plancher, alors que
+                                      // `context.sp(...)` (taille de police,
+                                      // voir `responsive.dart`) a un plancher
+                                      // à 85 % — le texte du bouton
+                                      // rétrécissait donc moins vite que la
+                                      // largeur qui le contenait, et finissait
+                                      // tronqué ("S'inscr..."). En laissant
+                                      // `ListTile.trailing` dimensionner
+                                      // lui-même sur la largeur intrinsèque du
+                                      // contenu (spinner de chargement à
+                                      // largeur fixe, réduite mais toujours
+                                      // suffisante ; bouton/libellé
+                                      // dimensionné à son propre texte), le
+                                      // libellé ne peut plus jamais être
+                                      // coupé, quelle que soit la taille de
+                                      // l'écran.
+                                      : (isPending
+                                          ? SizedBox(
+                                              width: context.wp(28),
+                                              child: Center(
+                                                child: SizedBox(
+                                                  height: context.hp(20),
+                                                  width: context.wp(20),
+                                                  child: const CircularProgressIndicator(
+                                                      strokeWidth: 2),
                                                 ),
-                                        ),
+                                              ),
+                                            )
+                                          : _RegistrationButton(
+                                              registration: myReg,
+                                              full: slot.isFull,
+                                              onPressed: () => _toggleRegistration(
+                                                regRepo: regRepo,
+                                                slot: slot,
+                                                myRegistration: myReg,
+                                              ),
+                                            )),
                                 );
                               },
                             );
@@ -485,6 +510,15 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
 /// confirmation prime pour cette formule. Un jour sans aucune occurrence
 /// reste gris (`dayFormulas[i].isEmpty`, pas un statut).
 ///
+/// **Nombre d'occurrences (18 août 2026, demande de Margaux)** : un carré
+/// affiche toujours UNE seule icône par formule (pas une par cours — sinon
+/// `_DaySquare` ne saurait plus les distinguer visuellement d'une formule
+/// différente), mais un petit badge numéroté apparaît désormais sur
+/// l'icône dès que 2 occurrences ou plus de la même formule tombent le même
+/// jour (ex. 2 séances "Collectif"), pour que ce cas reste visuellement
+/// différent d'une seule inscription (voir `dayFormulaCounts`,
+/// `_MiniIconWithBadge` dans `week_recap_row.dart`).
+///
 /// Flux Firestore propres, indépendants de ceux utilisés par la liste de
 /// créneaux plus bas dans l'écran — plus simple à isoler ainsi (le récap
 /// vit dans le bandeau, hors de l'arbre des `StreamBuilder` imbriqués de la
@@ -538,16 +572,48 @@ class _WeekRecapLoader extends StatelessWidget {
 
                 final dayFormulas = <Set<String>>[];
                 final dayFormulaStatuses = <Map<String, DayRecapStatus>>[];
+                // Nombre d'occurrences PAR FORMULE et par jour (18 août
+                // 2026, demande de Margaux) — un carré reste 1 icône par
+                // formule (pas 1 par cours, voir doc de classe), mais
+                // affiche désormais un petit badge avec ce nombre dès qu'il
+                // y en a 2 ou plus (ex. 2 séances "Collectif" le même jour),
+                // pour que 2 inscriptions à la même formule restent
+                // visuellement distinguables d'une seule. Voir
+                // `_DaySquare`/`_MiniIconWithBadge` dans `week_recap_row.dart`.
+                final dayFormulaCounts = <Map<String, int>>[];
+                // "À risque" par formule et par jour (18 août 2026, demande
+                // de Margaux) — vrai dès que l'adhérent est l'unique
+                // inscrit(e) confirmé(e) d'AU MOINS UN créneau collectif/duo
+                // de cette formule ce jour-là (même logique que
+                // `SlotCard._isAtRiskOfCancellation`, voir `slot_card.dart`),
+                // pour que le carré du récap passe rouge en plus de la carte
+                // du créneau elle-même. Voir `_DaySquare` dans
+                // `week_recap_row.dart`.
+                final dayFormulaAtRisk = <Map<String, bool>>[];
                 for (final day in weekDays) {
                   final formulas = <String>{};
                   final statuses = <String, DayRecapStatus>{};
+                  final counts = <String, int>{};
+                  final risks = <String, bool>{};
                   // Statut PAR FORMULE (10 août 2026, remplace l'agrégat
                   // par jour) — la confirmation prime si plusieurs
                   // occurrences de la même formule le même jour ont des
                   // statuts différents (ex. 2 créneaux collectifs, un
-                  // confirmé et un en liste d'attente).
-                  void markStatus(String formula, bool confirmed) {
+                  // confirmé et un en liste d'attente). [occurrences] (18
+                  // août 2026) : nombre d'occurrences à ajouter au compteur
+                  // de cette formule pour ce jour — 1 par défaut (un appel =
+                  // une occurrence), sauf pour Rekovery où toutes les
+                  // demandes du jour sont comptées en un seul appel groupé
+                  // (voir plus bas). [atRisk] (18 août 2026) : une fois vrai
+                  // pour une formule ce jour-là, reste vrai même si un appel
+                  // ultérieur pour la même formule passe `false` (une seule
+                  // occurrence à risque suffit à alerter sur toute la
+                  // formule ce jour-là).
+                  void markStatus(String formula, bool confirmed,
+                      {int occurrences = 1, bool atRisk = false}) {
                     formulas.add(formula);
+                    counts[formula] = (counts[formula] ?? 0) + occurrences;
+                    risks[formula] = (risks[formula] ?? false) || atRisk;
                     final current = statuses[formula];
                     statuses[formula] = current == DayRecapStatus.confirmed
                         ? current!
@@ -559,30 +625,44 @@ class _WeekRecapLoader extends StatelessWidget {
                     if (s.type == 'collective' || s.type == 'duo') {
                       final reg = myRegistrationsBySlotId[s.id];
                       if (reg == null) continue;
-                      markStatus(s.type == 'collective' ? 'collectif' : 'duo',
-                          reg.status == RegistrationStatus.confirmed);
+                      final confirmed = reg.status == RegistrationStatus.confirmed;
+                      markStatus(
+                        s.type == 'collective' ? 'collectif' : 'duo',
+                        confirmed,
+                        atRisk: confirmed && s.registeredCount < 2,
+                      );
                     } else if (s.type == 'individual' && s.adherentUid == uid) {
                       // Jamais de liste d'attente pour un individuel (créneau
                       // poussé directement par le coach) — toujours confirmé.
                       markStatus('individuel', true);
                     }
                   }
-                  final rekoveryToday =
-                      liveRequests.where((r) => _dayOf(_effectiveDate(r)).isAtSameMomentAs(day));
+                  final rekoveryToday = liveRequests
+                      .where((r) => _dayOf(_effectiveDate(r)).isAtSameMomentAs(day))
+                      .toList();
                   if (rekoveryToday.isNotEmpty) {
                     // `pending`/`proposed` : en attente d'une réponse,
                     // affiché "En attente" ailleurs dans l'app (voir
-                    // `rekovery_request_card.dart`).
-                    markStatus('rekovery',
-                        rekoveryToday.any((r) => r.status == RekoveryRequestStatus.accepted));
+                    // `rekovery_request_card.dart`). `occurrences` = nombre
+                    // réel de demandes ce jour-là (rare, mais possible en
+                    // liste d'attente/appui long sur plusieurs créneaux).
+                    markStatus(
+                      'rekovery',
+                      rekoveryToday.any((r) => r.status == RekoveryRequestStatus.accepted),
+                      occurrences: rekoveryToday.length,
+                    );
                   }
                   dayFormulas.add(formulas);
                   dayFormulaStatuses.add(statuses);
+                  dayFormulaCounts.add(counts);
+                  dayFormulaAtRisk.add(risks);
                 }
 
                 return WeekRecapRow(
                   dayFormulas: dayFormulas,
                   dayFormulaStatuses: dayFormulaStatuses,
+                  dayFormulaCounts: dayFormulaCounts,
+                  dayFormulaAtRisk: dayFormulaAtRisk,
                 );
               },
             );
@@ -623,7 +703,21 @@ class _RegistrationButton extends StatelessWidget {
       // `_WeeklyPlanningScreenState._confirmUnregister`).
       return Padding(
         padding: EdgeInsets.symmetric(vertical: context.hp(6), horizontal: context.wp(4)),
+        // `mainAxisSize: MainAxisSize.min` AJOUTÉ le 18 août 2026 (bug
+        // critique corrigé, remonté par Margaux juste après le lot de
+        // correctifs précédent) : un `Row` sans cette précision réclame par
+        // défaut TOUTE la largeur disponible (`MainAxisSize.max`). Tant que
+        // ce `Row` restait enfermé dans le `SizedBox` à largeur fixe retiré
+        // la veille (voir `trailing:` plus haut), ce comportement par défaut
+        // ne se voyait pas — une fois cette largeur fixe supprimée pour
+        // corriger la troncature du bouton "S'inscrire" (créneau non
+        // encore inscrit), ce `Row`-ci (créneau déjà inscrit/en attente) en
+        // a hérité : `ListTile` lui réservait alors TOUTE la largeur
+        // disponible dans `trailing`, ne laissant presque plus de place au
+        // titre du créneau (nom du cours/heure/nombre d'inscrits, réduit à
+        // 1 caractère de large).
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(

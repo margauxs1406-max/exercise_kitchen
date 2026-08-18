@@ -74,7 +74,24 @@ class _ProfileBody extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true) await auth.signOut();
+    if (confirmed != true) return;
+    await auth.signOut();
+    // Bug corrigé le 17 août 2026 (demande de Margaux : "quand je me
+    // déconnecte manuellement, ça tourne dans le vide, il faut cliquer sur
+    // le bouton retour pour débloquer"). Cause : cet écran est ouvert via
+    // `Navigator.push` (voir `weekly_planning_screen.dart`/
+    // `adherent_rekovery_screen.dart`), donc empilé PAR-DESSUS la route de
+    // base gérée par `RoleGate` (voir `app.dart` : `home: const
+    // RoleGate()`). `auth.signOut()` fait bien basculer le contenu de cette
+    // route de base vers `LoginScreen` en arrière-plan, mais sans `pop`
+    // explicite ici, cet écran de profil restait affiché PAR-DESSUS —
+    // masquant l'écran de connexion déjà prêt en dessous — jusqu'à ce
+    // qu'un geste retour (bouton physique/Navigator) le retire. On revient
+    // donc explicitement à la route de base dès la déconnexion effectuée,
+    // pour que l'écran de connexion apparaisse immédiatement.
+    if (context.mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   Future<void> _showChangePasswordDialog(BuildContext context) async {

@@ -79,6 +79,19 @@ class _SlotColors {
 /// désormais juste en gras, sans couleur (10 août 2026, demande de
 /// Margaux : la couleur orange du texte se confondait avec la nouvelle
 /// couleur de fond des duos).
+///
+/// **Risque d'annulation (18 août 2026, demande de Margaux, voir
+/// [_isAtRiskOfCancellation])** : un collectif/duo à moins de 2 inscrits
+/// passe entièrement en rouge — fond de carte rouge pâle
+/// (`AppColors.lightRed`), icône et nombre d'inscrits rouge vif
+/// (`AppColors.flashyRed`) — quel que soit [colorMode] ou l'état de
+/// [highlightAlert], sur les deux écrans (coach ET adhérent, puisque les
+/// deux utilisent [SlotCard]). À l'origine limité aux 4h précédant le
+/// début du cours (mêmes seuils que l'alerte push coach côté serveur,
+/// `checkLowRegistrationSlotsForCoach`) ; Margaux a demandé le retrait de
+/// cette condition de délai le jour même (deuxième demande) — l'alerte
+/// push coach, elle, garde son propre seuil de 4h côté serveur, ce
+/// changement ne concerne que l'affichage client.
 class SlotCard extends StatelessWidget {
   final SlotModel slot;
   final Widget? trailing;
@@ -114,6 +127,22 @@ class SlotCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
   });
+
+  /// Vrai si ce créneau collectif/duo a moins de 2 inscrits (18 août 2026,
+  /// demande de Margaux) — plus de condition de délai depuis le 18 août
+  /// 2026 (deuxième demande, même jour) : à l'origine limité aux 4h
+  /// précédant le début du cours (mêmes seuils que l'alerte coach côté
+  /// serveur, `checkLowRegistrationSlotsForCoach`), Margaux a ensuite
+  /// demandé que ce signal visuel soit affiché "quoi qu'il arrive", sans
+  /// tenir compte du délai avant le début (l'ancien calcul d'heure de
+  /// début, `_slotStart`, a donc été retiré, devenu inutile). Ne concerne
+  /// ni l'individuel (toujours 1 seul inscrit, non pertinent) ni le
+  /// workshop (pas de compteur, voir [showCount]).
+  bool get _isAtRiskOfCancellation {
+    if (!showCount) return false;
+    if (slot.type != 'collective' && slot.type != 'duo') return false;
+    return slot.registeredCount < 2;
+  }
 
   IconData get _icon {
     switch (slot.type) {
@@ -153,16 +182,23 @@ class SlotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // "Risque d'annulation" (18 août 2026, voir [_isAtRiskOfCancellation])
+    // prime sur tout le reste : fond rouge pâle + icône/nombre d'inscrits
+    // rouge vif, quel que soit [colorMode] ou l'état de [highlightAlert] —
+    // c'est le signal le plus urgent que peut afficher cette carte.
+    final atRisk = _isAtRiskOfCancellation;
     final showAlert =
         showCount && highlightAlert && (slot.isEmpty || slot.hasOnlyOneRegistered);
-    final alertStyle = !showAlert
-        ? const TextStyle(color: AppColors.mediumGrey)
-        : (slot.type == 'duo'
-            // Duo : comportement d'origine, texte orange gras.
-            ? const TextStyle(color: AppColors.orange, fontWeight: FontWeight.w600)
-            // Collectif (et tout autre type comptabilisé) : juste gras,
-            // sans couleur (10 août 2026).
-            : const TextStyle(fontWeight: FontWeight.w600));
+    final alertStyle = atRisk
+        ? const TextStyle(color: AppColors.flashyRed, fontWeight: FontWeight.w700)
+        : !showAlert
+            ? const TextStyle(color: AppColors.mediumGrey)
+            : (slot.type == 'duo'
+                // Duo : comportement d'origine, texte orange gras.
+                ? const TextStyle(color: AppColors.orange, fontWeight: FontWeight.w600)
+                // Collectif (et tout autre type comptabilisé) : juste gras,
+                // sans couleur (10 août 2026).
+                : const TextStyle(fontWeight: FontWeight.w600));
 
     final Widget subtitle;
     if (!showCount) {
@@ -202,7 +238,7 @@ class SlotCard extends StatelessWidget {
             );
     }
 
-    final colors = _colors;
+    final colors = atRisk ? _SlotColors.tinted(AppColors.lightRed, AppColors.flashyRed) : _colors;
     return Card(
       color: colors.cardBackground,
       child: ListTile(
