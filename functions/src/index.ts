@@ -110,6 +110,40 @@ async function requireCoach(uid: string | undefined): Promise<void> {
  * empêcher l'envoi aux autres destinataires ni faire échouer la fonction
  * appelante.
  */
+/**
+ * Codes d'erreur FCM signifiant que le token ne correspond plus à AUCUNE
+ * installation vivante de l'app (app désinstallée, ou réinstallée avec une
+ * config Firebase différente — ce qui invalide l'ancien token) : plus
+ * aucune notification ne pourra jamais y arriver, il ne sert donc à rien de
+ * le garder. À distinguer d'une erreur transitoire (réseau, quota...), qui
+ * elle ne doit PAS entraîner de suppression.
+ */
+const DEAD_TOKEN_ERROR_CODES = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+]);
+
+/**
+ * Retire [token] du tableau `fcmTokens` de TOUS les utilisateurs qui
+ * l'auraient encore (normalement un seul, mais `array-contains` couvre le
+ * cas où plusieurs comptes auraient été connectés sur le même appareil
+ * sans que l'ancien token ait été retiré entretemps). Best-effort : une
+ * erreur ici ne doit jamais faire échouer l'envoi des autres notifications
+ * (voir [sendPushToTokens]).
+ */
+async function pruneDeadToken(token: string): Promise<void> {
+  try {
+    const snap = await db.collection("users").where("fcmTokens", "array-contains", token).get();
+    await Promise.all(
+      snap.docs.map((doc) =>
+        doc.ref.update({ fcmTokens: admin.firestore.FieldValue.arrayRemove(token) })
+      )
+    );
+  } catch (err) {
+    logger.error("pruneDeadToken: échec du nettoyage", err);
+  }
+}
+
 async function sendPushToTokens(
   tokens: string[],
   title: string,
@@ -135,14 +169,29 @@ async function sendPushToTokens(
         tokens: batch,
         notification: { title, body },
       });
+      const deadTokens: string[] = [];
       response.responses.forEach((r, idx) => {
         if (!r.success) {
           logger.warn(`Échec d'envoi push pour un token`, {
             token: batch[idx],
             error: r.error?.message,
           });
+          // Nettoyage automatique (19 août 2026, demande de Margaux — suite
+          // au diagnostic des notifications iPhone absentes) : un token
+          // "NotRegistered"/invalide est mort pour toujours (typiquement un
+          // ancien token laissé par une réinstallation avec une config
+          // Firebase différente, ex. changement de bundle ID) — le garder
+          // ne fait que polluer `fcmTokens` et générer cet avertissement à
+          // chaque futur envoi, sans jamais empêcher les tokens valides de
+          // recevoir leur notification (chaque token est indépendant).
+          if (r.error?.code && DEAD_TOKEN_ERROR_CODES.has(r.error.code)) {
+            deadTokens.push(batch[idx]);
+          }
         }
       });
+      if (deadTokens.length > 0) {
+        await Promise.all(deadTokens.map((t) => pruneDeadToken(t)));
+      }
     } catch (err) {
       logger.error("Échec de l'envoi push (lot)", err);
     }

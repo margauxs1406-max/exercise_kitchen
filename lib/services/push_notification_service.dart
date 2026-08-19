@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 /// Notifications push (FCM) — section 4 des spécifications. Ne gère QUE le
@@ -56,6 +57,35 @@ class PushNotificationService {
   Future<void> registerForUser(String uid) async {
     try {
       await FirebaseMessaging.instance.requestPermission();
+      // Sur iOS, `getToken()` a besoin que l'appareil ait fini d'obtenir
+      // son token APNs natif auprès d'Apple — une étape asynchrone
+      // distincte de la simple autorisation, qui peut prendre quelques
+      // secondes après `requestPermission()`. Si `getToken()` est appelé
+      // trop tôt, le token FCM renvoyé existe bien comme chaîne de
+      // caractères et s'enregistre normalement, mais n'est jamais relié à
+      // Apple côté serveur : les envois échouent alors indéfiniment avec
+      // l'erreur FCM "NotRegistered", quel que soit le nombre de
+      // reconnexions (19-20 août 2026, diagnostiqué avec Margaux — aucune
+      // notification n'arrivait jamais sur iPhone alors que la
+      // configuration Apple/Firebase était pourtant correcte). On attend
+      // donc explicitement ce token APNs (jusqu'à 10 secondes) avant de
+      // demander le token FCM — inutile sur Android, qui n'a pas cette
+      // étape intermédiaire.
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        var apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        var attempts = 0;
+        while (apnsToken == null && attempts < 10) {
+          await Future.delayed(const Duration(seconds: 1));
+          apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+          attempts++;
+        }
+        if (apnsToken == null) {
+          debugPrint(
+            'Token APNs jamais reçu après 10s — abandon de l\'enregistrement FCM.',
+          );
+          return;
+        }
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await _saveToken(uid, token);
