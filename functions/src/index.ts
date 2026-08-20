@@ -168,6 +168,30 @@ async function sendPushToTokens(
       const response = await admin.messaging().sendEachForMulticast({
         tokens: batch,
         notification: { title, body },
+        // Bloc APNs explicite (20 août 2026, diagnostic notifications iPhone
+        // absentes) : jusqu'ici on ne fournissait que le champ `notification`
+        // générique et on laissait le SDK Admin le traduire automatiquement
+        // en payload APNs. Les logs système de l'iPhone (Console.app,
+        // process apsd/SpringBoard) montrent que le push est bien reçu et
+        // traité jusqu'au bout côté appareil, mais AUCUNE bannière ne
+        // s'affiche jamais — ni chez Margaux, ni chez aucun de ses testeurs.
+        // Pour éliminer tout doute sur la façon dont ce champ est traduit
+        // (notamment le fait qu'`apns-priority` apparaissait à `null` dans
+        // les logs), on fournit maintenant explicitement le dictionnaire
+        // `aps.alert` attendu par iOS, avec une priorité "immédiate" et un
+        // son par défaut. N'affecte pas Android (qui utilise `notification`
+        // indépendamment).
+        apns: {
+          headers: {
+            "apns-priority": "10",
+          },
+          payload: {
+            aps: {
+              alert: { title, body },
+              sound: "default",
+            },
+          },
+        },
       });
       const deadTokens: string[] = [];
       response.responses.forEach((r, idx) => {
