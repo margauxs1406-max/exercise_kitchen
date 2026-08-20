@@ -37,14 +37,35 @@ class PushNotificationService {
     if (_foregroundListenerAttached) return;
     _foregroundListenerAttached = true;
     FirebaseMessaging.onMessage.listen((message) {
+      // Trace de diagnostic (20 août 2026, notifications iPhone toujours
+      // invisibles malgré une chaîne de livraison APNs/SpringBoard
+      // confirmée saine côté système) — INCONDITIONNELLE (avant le retour
+      // anticipé ci-dessous) pour établir, sans ambiguïté cette fois, si le
+      // code Dart reçoit seulement l'événement ou pas du tout quand l'app
+      // est au premier plan. À retirer une fois le problème résolu.
+      debugPrint(
+        '[PUSH] onMessage déclenché — title=${message.notification?.title} '
+        'body=${message.notification?.body} data=${message.data} '
+        'messageId=${message.messageId}',
+      );
       final title = message.notification?.title;
       final body = message.notification?.body;
-      if (title == null && body == null) return;
+      if (title == null && body == null) {
+        debugPrint('[PUSH] onMessage : title ET body sont null — pas de SnackBar affiché.');
+        return;
+      }
+      debugPrint('[PUSH] onMessage : affichage du SnackBar en cours...');
       scaffoldMessengerKey.currentState?.showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 5),
           content: Text([title, body].whereType<String>().join(' — ')),
         ),
+      );
+    });
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      debugPrint(
+        '[PUSH] onMessageOpenedApp — app rouverte via une notification : '
+        'title=${message.notification?.title}',
       );
     });
   }
@@ -87,8 +108,10 @@ class PushNotificationService {
         }
       }
       final token = await FirebaseMessaging.instance.getToken();
+      debugPrint('[PUSH] registerForUser($uid) : token FCM obtenu = $token');
       if (token != null) {
         await _saveToken(uid, token);
+        debugPrint('[PUSH] registerForUser($uid) : token enregistré sur Firestore.');
       }
       // Le token peut changer en cours de vie de l'app (réinstall, reset
       // Play Services...) : on le réenregistre alors automatiquement.
