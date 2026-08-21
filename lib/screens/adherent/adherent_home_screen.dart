@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../widgets/rekovery_nav_icon.dart';
 import 'adherent_rekovery_screen.dart';
 import 'progress_gallery_screen.dart';
@@ -32,6 +33,49 @@ class _AdherentHomeScreenState extends State<AdherentHomeScreen> {
   // Ordre Photos / Planning / Rekovery (voir doc de classe) : Planning
   // reste sélectionné par défaut, donc l'index initial est 1, pas 0.
   int _index = 1;
+
+  /// Ajouté le 21 août 2026 (demande de Margaux, points 1 et 2) : ouvre
+  /// automatiquement l'onglet Rekovery (ou Planning) quand la personne
+  /// appuie sur une notification. Voir `PushNotificationService.
+  /// pendingNotificationTarget` pour le détail du mécanisme.
+  void _onPendingNotificationTarget() {
+    final target =
+        context.read<PushNotificationService>().pendingNotificationTarget.value;
+    if (target == null) return;
+    final user = context.read<AuthService>().currentUser;
+    final hasRekovery = user?.formulas.contains('rekovery') ?? false;
+    setState(() {
+      _index = target == 'rekovery' && hasRekovery ? 2 : 1;
+    });
+    // Consommé : on remet à `null` pour ne pas re-déclencher la navigation
+    // au prochain rebuild (ex. changement d'autre chose dans `AuthService`).
+    context.read<PushNotificationService>().pendingNotificationTarget.value = null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context
+          .read<PushNotificationService>()
+          .pendingNotificationTarget
+          .addListener(_onPendingNotificationTarget);
+      // Cas où la notification a été tapée AVANT que cet écran n'existe
+      // (cold start : `getInitialMessage()` peut avoir résolu avant que ce
+      // `initState` ne soit atteint) — on vérifie une fois immédiatement.
+      _onPendingNotificationTarget();
+    });
+  }
+
+  @override
+  void dispose() {
+    context
+        .read<PushNotificationService>()
+        .pendingNotificationTarget
+        .removeListener(_onPendingNotificationTarget);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

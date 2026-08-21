@@ -45,6 +45,26 @@ class PushNotificationService with WidgetsBindingObserver {
   bool _foregroundListenerAttached = false;
   bool _lifecycleObserverAttached = false;
 
+  /// Cible de navigation en attente après un appui sur une notification —
+  /// ajouté le 21 août 2026 (demande de Margaux, points 1 et 2) : `null` =
+  /// rien à faire ; `'rekovery'` = ouvrir l'onglet Rekovery ; `'planning'` =
+  /// ouvrir l'onglet Planning (comportement par défaut pour toute
+  /// notification qui n'est pas explicitement une notification Rekovery,
+  /// voir le champ `data.type` envoyé côté `functions/src/index.ts`).
+  /// `AdherentHomeScreen`/`CoachHomeScreen` écoutent cette valeur et
+  /// remettent `null` une fois la navigation effectuée (voir leurs
+  /// `initState`).
+  final ValueNotifier<String?> pendingNotificationTarget =
+      ValueNotifier<String?>(null);
+
+  /// Détermine l'onglet à ouvrir à partir du champ `data.type` du message
+  /// (`'rekovery'` → onglet Rekovery, tout le reste → onglet Planning) et
+  /// met à jour [pendingNotificationTarget] en conséquence.
+  void _handleNotificationTap(RemoteMessage message) {
+    final type = message.data['type'];
+    pendingNotificationTarget.value = type == 'rekovery' ? 'rekovery' : 'planning';
+  }
+
   /// uid de la personne connectée pour laquelle on n'a pas encore réussi à
   /// enregistrer de token — sert à savoir s'il faut retenter au prochain
   /// retour au premier plan. `null` = rien à retenter (soit personne
@@ -90,8 +110,23 @@ class PushNotificationService with WidgetsBindingObserver {
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       debugPrint(
         '[PUSH] onMessageOpenedApp — app rouverte via une notification : '
-        'title=${message.notification?.title}',
+        'title=${message.notification?.title} data=${message.data}',
       );
+      _handleNotificationTap(message);
+    });
+    // Cas du "cold start" (21 août 2026, demande de Margaux, points 1 et 2) :
+    // si l'app était totalement fermée (pas seulement en arrière-plan) et
+    // que la personne l'a rouverte en appuyant sur la notification,
+    // `onMessageOpenedApp` ci-dessus ne se déclenche PAS (l'app vient tout
+    // juste d'être lancée, ce flux n'est pas encore actif) — c'est
+    // `getInitialMessage()` qui permet de récupérer ce message-là.
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message == null) return;
+      debugPrint(
+        '[PUSH] getInitialMessage — app relancée via une notification : '
+        'title=${message.notification?.title} data=${message.data}',
+      );
+      _handleNotificationTap(message);
     });
   }
 

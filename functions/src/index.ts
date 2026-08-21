@@ -147,7 +147,14 @@ async function pruneDeadToken(token: string): Promise<void> {
 async function sendPushToTokens(
   tokens: string[],
   title: string,
-  body: string
+  body: string,
+  // Étiquette optionnelle (21 août 2026, demande de Margaux) : permet à
+  // l'app de savoir, quand la personne appuie sur la notification, vers
+  // quel onglet naviguer. `"rekovery"` → onglet Rekovery ; absent/toute
+  // autre valeur → onglet Planning (comportement par défaut côté client,
+  // voir `push_notification_service.dart`). Doit être un Record<string,
+  // string> — contrainte de FCM, pas de types plus riches possibles ici.
+  data?: Record<string, string>
 ): Promise<void> {
   const unique = Array.from(new Set(tokens)).filter((t) => !!t);
   if (unique.length === 0) {
@@ -168,6 +175,7 @@ async function sendPushToTokens(
       const response = await admin.messaging().sendEachForMulticast({
         tokens: batch,
         notification: { title, body },
+        ...(data ? { data } : {}),
         // Bloc APNs explicite (20 août 2026, diagnostic notifications iPhone
         // absentes) : jusqu'ici on ne fournissait que le champ `notification`
         // générique et on laissait le SDK Admin le traduire automatiquement
@@ -899,7 +907,8 @@ export const requestRekoverySlot = onCall(
     await sendPushToTokens(
       tokens,
       "Nouvelle demande",
-      `${adherentName} demande un Rekovery à ${startTime.replace(":", "h")} le ${weekdayShortDate(dateTimestamp)}.`
+      `${adherentName} demande un Rekovery à ${startTime.replace(":", "h")} le ${weekdayShortDate(dateTimestamp)}.`,
+      { type: "rekovery" }
     );
 
     return { requestId: reqRef.id };
@@ -962,7 +971,8 @@ export const coachAcceptRekoveryRequest = onCall(
     await sendPushToTokens(
       tokens,
       "Rekovery confirmé",
-      `Ton Rekovery du ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} est confirmé.`
+      `Ton Rekovery du ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} est confirmé.`,
+      { type: "rekovery" }
     );
 
     return { ok: true };
@@ -1003,7 +1013,8 @@ export const coachRefuseRekoveryRequest = onCall(
       "Demande Rekovery refusée",
       note
         ? `Ta demande Rekovery ${refusedWhen} a été refusée : ${note}`
-        : `Ta demande Rekovery ${refusedWhen} a été refusée.`
+        : `Ta demande Rekovery ${refusedWhen} a été refusée.`,
+      { type: "rekovery" }
     );
 
     return { ok: true };
@@ -1061,7 +1072,8 @@ export const proposeRekoveryAlternative = onCall(
     await sendPushToTokens(
       tokens,
       "Rekovery : autre créneau proposé",
-      `Le coach te propose le ${weekdayShortDate(proposedTimestamp)} à ${proposedStartTime.replace(":", "h")}.`
+      `Le coach te propose le ${weekdayShortDate(proposedTimestamp)} à ${proposedStartTime.replace(":", "h")}.`,
+      { type: "rekovery" }
     );
 
     return { ok: true };
@@ -1144,7 +1156,8 @@ export const respondToRekoveryProposal = onCall(
       await sendPushToTokens(
         tokens,
         "Rekovery confirmé",
-        `La contre-proposition ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} a été acceptée.`
+        `La contre-proposition ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")} a été acceptée.`,
+        { type: "rekovery" }
       );
     }
 
@@ -1292,7 +1305,8 @@ export const modifyRekoveryRequest = onCall(
     await sendPushToTokens(
       tokens,
       "Demande Rekovery modifiée",
-      `${result.adherentName} a modifié sa demande : ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")}.`
+      `${result.adherentName} a modifié sa demande : ${weekdayShortDate(result.date)} à ${result.startTime.replace(":", "h")}.`,
+      { type: "rekovery" }
     );
 
     return { ok: true };
@@ -1573,7 +1587,9 @@ export const sendRekoveryReminders = onSchedule(
       try {
         const tokens = await getCoachTokens();
         // Titre/texte simplifiés (10 août 2026, demande de Margaux).
-        await sendPushToTokens(tokens, "Rekovery", `${req.adherentName} arrive dans 1h.`);
+        await sendPushToTokens(tokens, "Rekovery", `${req.adherentName} arrive dans 1h.`, {
+          type: "rekovery",
+        });
         await doc.ref.update({ reminderSent: true });
       } catch (err) {
         logger.error(`sendRekoveryReminders: échec pour la demande ${doc.id}`, err);

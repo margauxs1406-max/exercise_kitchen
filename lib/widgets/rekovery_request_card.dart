@@ -26,7 +26,9 @@ String _fmtDateTime(DateTime date, String startTime) {
     case RekoveryRequestStatus.accepted:
       return ('Confirmé', AppColors.flashyGreen, Icons.check_circle);
     case RekoveryRequestStatus.proposed:
-      return ('Autre créneau proposé', AppColors.orange, Icons.swap_horiz);
+      // Libellé raccourci le 21 août 2026, à la demande de Margaux (remplace
+      // "Autre créneau proposé").
+      return ('Nouvel horaire', AppColors.orange, Icons.swap_horiz);
     case RekoveryRequestStatus.refused:
       return ('Refusée', AppColors.darkGrey, Icons.close);
     case RekoveryRequestStatus.cancelled:
@@ -158,6 +160,14 @@ class RekoveryRequestCard extends StatelessWidget {
         title: Text(showName ? request.adherentName : 'Rekovery'),
         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: subtitleLines),
         isThreeLine: subtitleLines.length > 2,
+        // Ajouté le 21 août 2026 (demande de Margaux) : sans ce réglage,
+        // `ListTile` aligne `leading`/`trailing` en HAUT de la carte dès que
+        // `isThreeLine` est vrai (comportement par défaut du Material Design
+        // pour les cartes à 3 lignes) — visible typiquement quand un coach
+        // refuse une demande avec un message écrit, qui agrandit la carte.
+        // Ce réglage force le centrage vertical du bloc statut+icône, quelle
+        // que soit la hauteur réelle de la carte.
+        titleAlignment: ListTileTitleAlignment.center,
         // Largeur FIXE (6 août 2026) : sans elle, la largeur du `Column`
         // s'ajuste au libellé ("En attente"/"Confirmé"/"Annulée"/...), donc
         // l'icône (centrée dans cette largeur variable) se retrouvait

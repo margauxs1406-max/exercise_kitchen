@@ -78,7 +78,9 @@ class _HistoryTile extends StatelessWidget {
       case RekoveryRequestStatus.accepted:
         return ('Confirmé', AppColors.flashyGreen, Icons.check_circle);
       case RekoveryRequestStatus.proposed:
-        return ('Autre créneau proposé', AppColors.orange, Icons.swap_horiz);
+        // Libellé raccourci le 21 août 2026, à la demande de Margaux (même
+        // changement que `rekovery_request_card.dart`).
+        return ('Nouvel horaire', AppColors.orange, Icons.swap_horiz);
       case RekoveryRequestStatus.refused:
         return ('Refusée', AppColors.darkGrey, Icons.close);
       case RekoveryRequestStatus.cancelled:
@@ -109,6 +111,10 @@ class _HistoryTile extends StatelessWidget {
         subtitle: request.coachNote != null && request.coachNote!.isNotEmpty
             ? Text('« ${request.coachNote} »', style: const TextStyle(color: AppColors.mediumGrey))
             : null,
+        // Ajouté le 21 août 2026 (même correctif que `rekovery_request_card.dart`) :
+        // force le centrage vertical du bloc statut+icône même si un long
+        // message du coach agrandit la carte sur plusieurs lignes.
+        titleAlignment: ListTileTitleAlignment.center,
         // Largeur fixe (6 août 2026, même correctif que `rekovery_request_card.dart`)
         // pour que l'icône reste au même endroit horizontalement quel que
         // soit le statut, une fois plusieurs lignes affichées les unes sous
