@@ -43,7 +43,20 @@ import UserNotifications
   }
 }
 
-extension AppDelegate: UNUserNotificationCenterDelegate {
+// Correctif (21 août 2026, 4 erreurs de compilation Xcode signalées par
+// Margaux) — deux causes distinctes :
+// 1. PAS de ": UNUserNotificationCenterDelegate" ici — `FlutterAppDelegate`
+//    (la classe dont hérite `AppDelegate`) conforme déjà elle-même à ce
+//    protocole. Le redéclarer sur cette extension provoquait "Redundant
+//    conformance of 'AppDelegate' to protocol
+//    'UNUserNotificationCenterDelegate'".
+// 2. `override` est OBLIGATOIRE sur `userNotificationCenter(...)`
+//    ci-dessous — contrairement à ce qu'on pensait initialement,
+//    `FlutterAppDelegate` fournit déjà une implémentation concrète de cette
+//    méthode (Xcode l'a confirmé explicitement : "Overriding declaration
+//    requires an 'override'"), ce n'est donc pas une méthode de protocole
+//    encore jamais implémentée.
+extension AppDelegate {
   // Appelée par iOS quand une notification arrive alors que l'app est au
   // premier plan. Sans ce délégué, iOS n'affichait rien du tout (ni
   // bannière système, ni transmission à Flutter) — c'était la cause du
@@ -51,11 +64,24 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
   // de Firebase Messaging intercepte cet appel pour transmettre
   // l'événement à `FirebaseMessaging.onMessage` ; on demande en plus
   // explicitement l'affichage de la bannière système même app ouverte.
-  func userNotificationCenter(
+  override func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler([.banner, .list, .sound, .badge])
+    // `.banner`/`.list` n'existent que depuis iOS 14 — le projet cible
+    // encore iOS 13.0 (voir notes de projet, section "Reste à faire", point
+    // sur le relèvement de l'iOS Deployment Target avant le printemps
+    // 2027), d'où les erreurs "'banner' is only available in iOS 14.0 or
+    // newer"/idem pour 'list'. `.alert` est l'équivalent compatible iOS 13,
+    // remplacé par `.banner`+`.list` à partir d'iOS 14 (dépréciation, pas
+    // suppression) — on choisit donc dynamiquement selon la version réelle
+    // de l'appareil, plutôt que de relever le Deployment Target du projet
+    // entier pour ce seul détail.
+    if #available(iOS 14.0, *) {
+      completionHandler([.banner, .list, .sound, .badge])
+    } else {
+      completionHandler([.alert, .sound, .badge])
+    }
   }
 }
