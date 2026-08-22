@@ -5,6 +5,7 @@ import '../models/rekovery_request_model.dart';
 import '../services/rekovery_repository.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/adaptive_pickers.dart';
 import 'picker_tile.dart';
 
 /// Coach : actions disponibles sur une demande Rekovery, selon son statut
@@ -194,7 +195,10 @@ class _ProposeAlternativeDialogState extends State<_ProposeAlternativeDialog> {
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final picked = await showDatePicker(
+    // Sélecteurs adaptés à la plateforme (22 août 2026 — cette pop-up de
+    // contre-proposition coach utilisait encore les sélecteurs Material
+    // bruts, contrairement au reste de l'app depuis le 7 août 2026).
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: _date.isBefore(today) ? today : _date,
       firstDate: today,
@@ -204,7 +208,7 @@ class _ProposeAlternativeDialogState extends State<_ProposeAlternativeDialog> {
   }
 
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _time);
+    final picked = await showAdaptiveTimePicker(context: context, initialTime: _time);
     if (picked != null) setState(() => _time = picked);
   }
 

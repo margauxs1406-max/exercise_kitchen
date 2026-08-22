@@ -5,6 +5,7 @@ import '../models/closure_model.dart';
 import '../services/planning_repository.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/adaptive_pickers.dart';
 import 'picker_tile.dart';
 
 /// Appui long sur un bandeau de fermeture (planning coach, voir
@@ -128,7 +129,10 @@ class _EditClosureDialogState extends State<_EditClosureDialog> {
     // `initialDate` ne doit jamais être avant `firstDate` : une fermeture
     // déjà passée garde sa date d'origine comme point de départ, mais on ne
     // repropose jamais une date antérieure à aujourd'hui.
-    final picked = await showDatePicker(
+    // Sélecteur adapté à la plateforme (22 août 2026 — cette pop-up
+    // utilisait encore le calendrier Material brut, contrairement au reste
+    // de l'app depuis le 7 août 2026).
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: _startDate.isBefore(today) ? today : _startDate,
       firstDate: today,
@@ -144,7 +148,7 @@ class _EditClosureDialogState extends State<_EditClosureDialog> {
 
   Future<void> _pickEndDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
+    final picked = await showAdaptiveDatePicker(
       context: context,
       initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
       firstDate: _startDate,
