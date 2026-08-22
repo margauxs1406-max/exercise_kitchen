@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../data/default_collective_schedule.dart';
 import '../models/closure_model.dart';
@@ -51,10 +52,12 @@ String _weekTypeAtOffset(String baseType, int weeksOffset) {
 /// appelée depuis l'écran de planning du coach. Seuls les cours duo restent
 /// ajoutés manuellement, ponctuellement, via [addDuoSlotForWeek].
 class PlanningRepository {
-  PlanningRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  PlanningRepository({FirebaseFirestore? firestore, FirebaseFunctions? functions})
+      : _firestore = firestore ?? FirebaseFirestore.instance,
+        _functions = functions ?? FirebaseFunctions.instanceFor(region: 'australia-southeast1');
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
   CollectionReference<Map<String, dynamic>> get _slots => _firestore.collection('slots');
   CollectionReference<Map<String, dynamic>> get _weekTypes =>
@@ -140,7 +143,32 @@ class PlanningRepository {
           .where('startTime', isEqualTo: def.startTime)
           .limit(1)
           .get();
-      if (existing.docs.isNotEmpty) continue;
+      if (existing.docs.isNotEmpty) {
+        // Correctif définitif (21 août 2026, demande de Margaux — un créneau
+        // du lundi généré "à la volée" affichait encore 6 comme capacité
+        // maximale) : cette méthode étant purement additive (elle ne créait
+        // jusqu'ici JAMAIS un créneau déjà existant), un créneau matérialisé
+        // par un appareil ayant encore une ancienne version de l'app
+        // installée (donc une ancienne valeur de [kDefaultCollectiveCapacity]
+        // compilée en dur dedans) restait bloqué à cette ancienne capacité
+        // pour toujours, même après la mise à jour de tous les autres
+        // appareils — exactement le même problème que la migration ponctuelle
+        // du 6 août 2026 (6 → 8), mais qui peut se reproduire à chaque
+        // nouvelle semaine tant qu'UN SEUL appareil non à jour est le premier
+        // à l'ouvrir. Auto-guérison : si la capacité enregistrée diffère de
+        // la valeur actuelle du code, on la corrige immédiatement — quel que
+        // soit l'appareil qui déclenche cette vérification ensuite, du
+        // moment qu'il est à jour. Le nombre d'inscrits n'est jamais
+        // affecté (seule la capacité change), et augmenter une capacité ne
+        // peut jamais mettre un créneau en incohérence (`registeredCount`
+        // reste toujours ≤ à la nouvelle capacité, plus grande).
+        final doc = existing.docs.first;
+        final currentCapacity = doc.data()['capacity'] as int? ?? kDefaultCollectiveCapacity;
+        if (currentCapacity != kDefaultCollectiveCapacity) {
+          await doc.reference.update({'capacity': kDefaultCollectiveCapacity});
+        }
+        continue;
+      }
 
       final slot = SlotModel(
         id: '',
@@ -533,13 +561,71 @@ class PlanningRepository {
         startDate: normStart,
         endDate: normEnd,
         message: message,
-        removedSlots: slotsInRange.docs.map((d) => d.data()).toList(),
+        // Compteurs remis à 0 (21 août 2026) : les inscriptions qui
+        // comptaient dans ces créneaux sont annulées en parallèle
+        // ci-dessous et ne reviendront pas — un créneau recréé plus tard
+        // (fermeture réduite/supprimée, voir [updateClosure]/[deleteClosure])
+        // doit repartir de zéro inscrit, pas de l'ancien compte.
+        removedSlots: slotsInRange.docs.map((d) => _zeroedSlotData(d.data())).toList(),
       ).toFirestore(),
     );
     for (final slotDoc in slotsInRange.docs) {
       batch.delete(slotDoc.reference);
     }
-    await batch.commit();
+
+    // Annule les inscriptions (cours ET Rekovery) touchées par cette
+    // fermeture (21 août 2026, bug corrigé — demande de Margaux) — voir doc
+    // de `cancelReservationsForClosure` côté Cloud Functions. Écriture
+    // directe interdite sur `registrations`/`rekoveryRequests` (voir
+    // `firestore.rules`), d'où cet appel obligatoire.
+    //
+    // Lancé EN PARALLÈLE du `batch.commit()` (21 août 2026, optimisation —
+    // Margaux a remarqué que la notification de fermeture n'arrivait plus
+    // instantanément depuis l'ajout de cet appel) plutôt qu'attendu avant :
+    // les deux opérations touchent des collections indépendantes
+    // (`registrations`/`rekoveryRequests` vs `closures`/`slots`), aucune
+    // des deux n'a besoin du résultat de l'autre pour être correcte — les
+    // exécuter en séquence ne faisait qu'additionner deux allers-retours
+    // réseau (dont un appel de Cloud Function, plus lent qu'une écriture
+    // Firestore directe) avant même que le document de fermeture ne soit
+    // créé, ce qui retardait d'autant le déclenchement de
+    // `onClosureCreated` et donc l'envoi de la notification.
+    await Future.wait([
+      _cancelReservationsForClosure(
+        slotIds: slotsInRange.docs.map((d) => d.id).toList(),
+        startDate: normStart,
+        endDate: normEnd,
+      ),
+      batch.commit(),
+    ]);
+  }
+
+  /// Copie de [data] avec `registeredCount`/`waitlistCount` remis à 0 — voir
+  /// [addClosure]/[updateClosure].
+  Map<String, dynamic> _zeroedSlotData(Map<String, dynamic> data) => {
+        ...data,
+        'registeredCount': 0,
+        'waitlistCount': 0,
+      };
+
+  /// Coach uniquement. Voir la doc complète côté Cloud Functions
+  /// (`cancelReservationsForClosure`, `functions/src/index.ts`) — supprime
+  /// les inscriptions de cours pointant vers [slotIds], et annule (avec
+  /// recrédit du carnet si besoin) les demandes Rekovery actives dans
+  /// [startDate]–[endDate]. Ne fait rien si [slotIds] est vide (mais
+  /// appelée quand même : une fermeture peut couvrir une période sans aucun
+  /// cours mais avec des demandes Rekovery).
+  Future<void> _cancelReservationsForClosure({
+    required List<String> slotIds,
+    required DateTime startDate,
+    required DateTime endDate,
+  }) {
+    final callable = _functions.httpsCallable('cancelReservationsForClosure');
+    return callable.call<void>({
+      'slotIds': slotIds,
+      'startDate': startDate.toUtc().toIso8601String(),
+      'endDate': endDate.toUtc().toIso8601String(),
+    });
   }
 
   /// Coach : modifie la période et/ou le message d'une fermeture déjà créée
@@ -587,7 +673,13 @@ class PlanningRepository {
       'startDate': Timestamp.fromDate(normStart),
       'endDate': Timestamp.fromDate(normEnd),
       'message': message,
-      'removedSlots': [...stillRemoved, ...slotsNowInRange.docs.map((d) => d.data())],
+      // Compteurs remis à 0 pour les créneaux nouvellement supprimés — voir
+      // [addClosure]. Ceux déjà dans `stillRemoved` gardent leur snapshot
+      // existant (déjà zéro si créés après ce correctif).
+      'removedSlots': [
+        ...stillRemoved,
+        ...slotsNowInRange.docs.map((d) => _zeroedSlotData(d.data())),
+      ],
     });
     for (final slotDoc in slotsNowInRange.docs) {
       batch.delete(slotDoc.reference);
@@ -595,7 +687,21 @@ class PlanningRepository {
     for (final raw in toRestore) {
       batch.set(_slots.doc(), raw);
     }
-    await batch.commit();
+
+    // Annule les inscriptions (cours ET Rekovery) des créneaux nouvellement
+    // couverts, comme à la création — voir [addClosure]. Les créneaux déjà
+    // supprimés par cette fermeture (`stillRemoved`/`toRestore` ci-dessus)
+    // ont déjà été traités lors de leur suppression initiale, inutile de le
+    // refaire ici. En parallèle du `batch.commit()` — même optimisation de
+    // latence que [addClosure], voir sa doc.
+    await Future.wait([
+      _cancelReservationsForClosure(
+        slotIds: slotsNowInRange.docs.map((d) => d.id).toList(),
+        startDate: normStart,
+        endDate: normEnd,
+      ),
+      batch.commit(),
+    ]);
   }
 
   /// Coach : supprime une fermeture ET recrée tous les créneaux

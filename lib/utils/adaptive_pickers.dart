@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 
 /// Sélecteurs de date/heure adaptés à la plateforme (7 août 2026, demande de
@@ -139,7 +140,7 @@ Future<DateTime?> _showCupertinoDatePicker({
                         horizontal: context.wp(16), vertical: context.hp(4)),
                     child: Text(
                       error!,
-                      style: const TextStyle(color: CupertinoColors.destructiveRed),
+                      style: const TextStyle(color: AppColors.flashyRed),
                     ),
                   ),
                 SizedBox(

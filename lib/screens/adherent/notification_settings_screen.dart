@@ -79,6 +79,12 @@ const List<NotificationTypeInfo> kNotificationTypes = [
     description: "Un nouveau workshop ou une fermeture de la salle est annoncé.e.",
     // Toujours affiché : concerne tout le monde, quelle que soit la formule.
   ),
+  NotificationTypeInfo(
+    key: 'rekoveryClosureBroadcast',
+    label: 'Fermeture Rekovery',
+    description: "L'espace Rekovery est temporairement inaccessible sur une période.",
+    requiredFormulas: {'rekovery'},
+  ),
 ];
 
 /// Sous-menu "Notifications" du profil adhérent : liste uniquement les

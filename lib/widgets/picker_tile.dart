@@ -50,7 +50,15 @@ class PickerTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(color: valueColor, fontWeight: valueWeight),
+                  // Taille responsive ajoutée le 22 août 2026 (rationalisation
+                  // des polices, demande de Margaux) : "Valeur sélectionnée"
+                  // du système à 8 styles — seul texte de l'app qui n'avait
+                  // jusque-là aucun `context.sp()`.
+                  style: TextStyle(
+                    color: valueColor,
+                    fontWeight: valueWeight,
+                    fontSize: context.sp(14),
+                  ),
                 ),
               ),
             ],
@@ -76,7 +84,11 @@ class PickerTile extends StatelessWidget {
               SizedBox(height: context.hp(4)),
               Text(
                 label,
-                style: TextStyle(color: valueColor, fontWeight: valueWeight),
+                style: TextStyle(
+                  color: valueColor,
+                  fontWeight: valueWeight,
+                  fontSize: context.sp(14),
+                ),
               ),
             ],
           );

@@ -155,11 +155,12 @@ class _AdherentList extends StatelessWidget {
                         children: [
                           Icon(Icons.check_circle, color: AppColors.flashyGreen, size: context.wp(18)),
                           SizedBox(width: context.wp(4)),
-                          const Text(
+                          Text(
                             'Actif',
                             style: TextStyle(
                               color: AppColors.flashyGreen,
                               fontWeight: FontWeight.w600,
+                              fontSize: context.sp(12),
                             ),
                           ),
                         ],
@@ -169,11 +170,12 @@ class _AdherentList extends StatelessWidget {
                         children: [
                           Icon(Icons.cancel, color: AppColors.darkGrey, size: context.wp(18)),
                           SizedBox(width: context.wp(4)),
-                          const Text(
+                          Text(
                             'Clôturé',
                             style: TextStyle(
                               color: AppColors.darkGrey,
                               fontWeight: FontWeight.w600,
+                              fontSize: context.sp(12),
                             ),
                           ),
                         ],

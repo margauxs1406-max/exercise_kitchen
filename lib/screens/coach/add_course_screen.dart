@@ -8,6 +8,7 @@ import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import '../../utils/adaptive_pickers.dart';
+import '../../widgets/field_label.dart';
 import '../../widgets/picker_tile.dart';
 
 /// Ajout au planning côté coach, en deux parties (remplace l'ancien
@@ -98,32 +99,6 @@ final ButtonStyle _kSegmentedButtonStyle = SegmentedButton.styleFrom(
   selectedForegroundColor: AppColors.white,
   side: BorderSide(color: AppColors.mediumGrey.withValues(alpha: 0.35)),
 );
-
-/// Libellé fixe au-dessus d'un champ (au lieu d'un `labelText` flottant qui,
-/// une fois posé sur le contour du champ, se retrouve à moitié sur le fond
-/// blanc du champ et à moitié sur le fond gris de la page).
-class _FieldLabel extends StatelessWidget {
-  final String text;
-  const _FieldLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: context.hp(6)),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          text,
-          style: TextStyle(
-            color: AppColors.black,
-            fontWeight: FontWeight.w600,
-            fontSize: context.sp(14),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Format de date unique pour tout l'écran : "Le JJ/MM/AAAA", avec jour ET
 /// mois toujours sur 2 chiffres (avant, "7" au lieu de "07" pouvait
@@ -476,7 +451,7 @@ class _AdherentPickerState extends State<_AdherentPicker> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _FieldLabel(widget.fieldLabel),
+            FieldLabel(widget.fieldLabel),
             KeyedSubtree(
               key: _fieldKey,
               child: PickerTile(
@@ -640,11 +615,8 @@ class _AddEventTabState extends State<_AddEventTab> with WidgetsBindingObserver 
             .showSnackBar(const SnackBar(content: Text('Choisis une date de début.')));
         return;
       }
-      if (_messageController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Ajoute un message pour les adhérents.')));
-        return;
-      }
+      // Message facultatif depuis le 21 août 2026 (demande de Margaux) —
+      // plus aucune validation ici, contrairement à avant.
     }
     setState(() => _submitting = true);
     try {
@@ -751,13 +723,13 @@ class _AddEventTabState extends State<_AddEventTab> with WidgetsBindingObserver 
                     ],
                   ),
                   SizedBox(height: context.hp(12)),
-                  const _FieldLabel('Titre'),
+                  const FieldLabel('Titre'),
                   TextFormField(
                     controller: _titleController,
                     decoration: const InputDecoration(),
                   ),
                   SizedBox(height: context.hp(12)),
-                  const _FieldLabel('Description (facultatif)'),
+                  const FieldLabel('Description (facultatif)'),
                   TextFormField(
                     controller: _descriptionController,
                     maxLines: 3,
@@ -788,7 +760,7 @@ class _AddEventTabState extends State<_AddEventTab> with WidgetsBindingObserver 
                     onTap: _pickClosureRange,
                   ),
                   SizedBox(height: context.hp(12)),
-                  const _FieldLabel('Message affiché aux adhérents'),
+                  const FieldLabel('Message aux adhérents (facultatif)'),
                   TextFormField(
                     controller: _messageController,
                     maxLines: 3,

@@ -181,10 +181,7 @@ class _CreateAdherentFormScreenState extends State<CreateAdherentFormScreen> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Carnet Rekovery',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 SizedBox(height: context.hp(8)),

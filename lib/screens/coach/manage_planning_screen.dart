@@ -158,10 +158,11 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen>
                 dropdownColor: AppColors.black,
                 iconEnabledColor: AppColors.white,
                 // Taille de police : +2pt le 9 août 2026, ramenée à +1pt le
-                // 10 août 2026 (demande de Margaux) par rapport au reste de
-                // l'en-tête ([AppTheme.headerTitleStyle], qui hérite de
-                // `context.sp(20)`).
-                style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(21)),
+                // 10 août 2026, puis alignée sur le reste de l'app (sp(20),
+                // comme partout ailleurs pour ce style) le 22 août 2026 —
+                // rationalisation des polices, demande de Margaux : l'écart
+                // isolé signalé par l'audit n'avait plus lieu d'être.
+                style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(20)),
                 // `selectedItemBuilder` + `alignment` (10 août 2026 : 2e
                 // correctif, le 1er du même jour — envelopper le texte dans
                 // un `Center` à l'intérieur de `selectedItemBuilder` — n'a
@@ -186,7 +187,7 @@ class _ManagePlanningScreenState extends State<ManagePlanningScreen>
                     .map(
                       (e) => Text(
                         e.value.toUpperCase(),
-                        style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(21)),
+                        style: AppTheme.headerTitleStyle.copyWith(fontSize: context.sp(20)),
                       ),
                     )
                     .toList(),

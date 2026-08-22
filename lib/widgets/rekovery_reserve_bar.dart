@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/closure_model.dart';
+import '../models/rekovery_closure_model.dart';
 import '../services/rekovery_repository.dart';
 import '../theme/responsive.dart';
 import '../utils/adaptive_pickers.dart';
@@ -24,7 +25,15 @@ import 'picker_tile.dart';
 /// existant en modifiant un utilitaire commun à ce stade.
 class RekoveryReserveBar extends StatefulWidget {
   final List<ClosureModel> closures;
-  const RekoveryReserveBar({super.key, this.closures = const []});
+  // Fermetures Rekovery (21 août 2026, distinctes des fermetures de salle
+  // ci-dessus) — voir `_isClosed`/`_temporaryClosuresFor` pour comment
+  // chaque forme (temporaire/prolongée) affecte le choix de date/heure.
+  final List<RekoveryClosureModel> rekoveryClosures;
+  const RekoveryReserveBar({
+    super.key,
+    this.closures = const [],
+    this.rekoveryClosures = const [],
+  });
 
   @override
   State<RekoveryReserveBar> createState() => _RekoveryReserveBarState();
@@ -45,9 +54,36 @@ class _RekoveryReserveBarState extends State<RekoveryReserveBar> {
     return currentWeekStart.add(Duration(days: nextWeekUnlocked ? 13 : 6));
   }
 
+  /// Vrai si [day] est ENTIÈREMENT inaccessible pour Rekovery : soit la
+  /// salle est fermée ce jour-là (`widget.closures`), soit une fermeture
+  /// Rekovery "prolongée" (`isTemporary == false`) le couvre. Une fermeture
+  /// Rekovery "temporaire" (juste une plage horaire) NE bloque PAS la
+  /// journée entière ici — seule la plage horaire concernée est bloquée,
+  /// voir [_temporaryClosuresFor] et la vérification faite dans [_pickTime]
+  /// une fois la date choisie (21 août 2026, demande de Margaux : l'accès
+  /// Rekovery doit s'aligner sur les fermetures de salle ET se mettre à
+  /// jour dès qu'une fermeture Rekovery est ajoutée).
   bool _isClosed(DateTime day) {
-    return widget.closures
-        .any((c) => !day.isBefore(_dayOf(c.startDate)) && !day.isAfter(_dayOf(c.endDate)));
+    final d = _dayOf(day);
+    final roomClosed = widget.closures
+        .any((c) => !d.isBefore(_dayOf(c.startDate)) && !d.isAfter(_dayOf(c.endDate)));
+    if (roomClosed) return true;
+    return widget.rekoveryClosures.any((c) =>
+        !c.isTemporary && !d.isBefore(_dayOf(c.startDate)) && !d.isAfter(_dayOf(c.endDate)));
+  }
+
+  /// Fermetures Rekovery "temporaires" couvrant précisément [day] — utilisé
+  /// par [_pickTime] pour refuser une heure qui tombe dans leur plage.
+  List<RekoveryClosureModel> _temporaryClosuresFor(DateTime day) {
+    final d = _dayOf(day);
+    return widget.rekoveryClosures
+        .where((c) => c.isTemporary && _dayOf(c.startDate) == d)
+        .toList();
+  }
+
+  static int _parseMinutes(String hhmm) {
+    final parts = hhmm.split(':');
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
 
   Future<void> _pickDate() async {
@@ -90,6 +126,25 @@ class _RekoveryReserveBarState extends State<RekoveryReserveBar> {
         ));
       }
       return;
+    }
+    // Fermeture Rekovery temporaire ce jour-là (21 août 2026) : refuse une
+    // heure qui tombe dans sa plage — voir [_temporaryClosuresFor].
+    if (_date != null) {
+      final minutes = picked.hour * 60 + picked.minute;
+      for (final c in _temporaryClosuresFor(_date!)) {
+        final startMinutes = _parseMinutes(c.startTime!);
+        final endMinutes = _parseMinutes(c.endTime!);
+        if (minutes >= startMinutes && minutes < endMinutes) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                "L'espace Rekovery est fermé de ${c.startTime} à ${c.endTime} ce jour-là.",
+              ),
+            ));
+          }
+          return;
+        }
+      }
     }
     setState(() => _time = picked);
   }

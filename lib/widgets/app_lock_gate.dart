@@ -95,7 +95,13 @@ class _AppLockGateState extends State<AppLockGate> {
                 SizedBox(height: context.hp(16)),
                 Text(
                   'Déverrouillage requis',
+                  // Poppins ajouté le 22 août 2026 (rationalisation des
+                  // polices, demande de Margaux) : seul titre plein écran de
+                  // l'app à ne pas utiliser la police des titres — taille
+                  // sp(18) volontairement conservée (compacte pour cet
+                  // écran), voir `audit_polices.md`.
                   style: TextStyle(
+                    fontFamily: AppTheme.titleFontFamily,
                     color: AppColors.white,
                     fontWeight: FontWeight.w600,
                     fontSize: context.sp(18),

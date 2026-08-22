@@ -37,7 +37,7 @@ Future<void> showRekoveryRequestActionsSheet(
 
   switch (request.status) {
     case RekoveryRequestStatus.pending:
-      final action = await _showModifyOrCancelSheet(context, cancelLabel: 'Annuler la demande');
+      final action = await _showModifyOrCancelSheet(context, cancelLabel: 'Annuler');
       if (action == null || !context.mounted) return;
       if (action == _MenuAction.modify) {
         await showDialog<void>(context: context, builder: (_) => _ModifyRequestDialog(request: request));
@@ -45,26 +45,24 @@ Future<void> showRekoveryRequestActionsSheet(
         await _confirmAndRun(
           context,
           title: 'Annuler ?',
-          message: 'Ta demande Rekovery sera annulée.',
-          confirmLabel: 'Annuler la demande',
+          message: 'Ta demande sera annulée.',
+          confirmLabel: 'Annuler',
           action: () => repo.cancelRequest(request.id),
         );
       }
       break;
 
     case RekoveryRequestStatus.accepted:
-      final action =
-          await _showModifyOrCancelSheet(context, cancelLabel: 'Annuler ma réservation');
+      final action = await _showModifyOrCancelSheet(context, cancelLabel: 'Annuler');
       if (action == null || !context.mounted) return;
       if (action == _MenuAction.modify) {
         await showDialog<void>(context: context, builder: (_) => _ModifyRequestDialog(request: request));
       } else {
         await _confirmAndRun(
           context,
-          title: 'Annuler ta réservation ?',
-          message: 'Ta séance Rekovery sera annulée. Si tu as un carnet limité, '
-              'la séance te sera recréditée.',
-          confirmLabel: 'Annuler ma réservation',
+          title: 'Annuler ?',
+          message: 'Ta séance sera annulée, et recréditée si ton carnet est limité.',
+          confirmLabel: 'Annuler',
           action: () => repo.cancelRequest(request.id),
         );
       }
@@ -80,15 +78,12 @@ Future<void> showRekoveryRequestActionsSheet(
             children: [
               ListTile(
                 leading: const Icon(Icons.check, color: AppColors.flashyGreen),
-                title: const Text('Accepter la proposition'),
+                title: const Text('Accepter'),
                 onTap: () => Navigator.of(context).pop(_ProposalChoice.accept),
               ),
               ListTile(
                 leading: const Icon(Icons.close, color: AppColors.orange),
-                title: const Text(
-                  'Refuser la proposition',
-                  style: TextStyle(color: AppColors.orange),
-                ),
+                title: const Text('Refuser', style: TextStyle(color: AppColors.orange)),
                 onTap: () => Navigator.of(context).pop(_ProposalChoice.refuse),
               ),
             ],
@@ -104,10 +99,10 @@ Future<void> showRekoveryRequestActionsSheet(
       } else {
         await _confirmAndRun(
           context,
-          title: 'Refuser cette proposition ?',
-          message: 'Ta demande Rekovery sera annulée — le coach ne pourra pas '
-              'proposer un autre créneau pour cette demande.',
+          title: 'Refuser ?',
+          message: 'Ta demande sera annulée, sans nouvelle proposition possible.',
           confirmLabel: 'Refuser',
+          dismissLabel: 'Annuler',
           action: () => repo.respondToProposal(request.id, accept: false),
         );
       }
@@ -140,7 +135,7 @@ Future<_MenuAction?> _showModifyOrCancelSheet(
         children: [
           ListTile(
             leading: const Icon(Icons.edit, color: AppColors.black),
-            title: const Text('Modifier la demande'),
+            title: const Text('Modifier'),
             onTap: () => Navigator.of(context).pop(_MenuAction.modify),
           ),
           ListTile(
@@ -159,6 +154,12 @@ Future<void> _confirmAndRun(
   required String title,
   required String message,
   required String confirmLabel,
+  // "Retour" par défaut (les 2 pop-up "Annuler ?" ci-dessus, dont le bouton
+  // de confirmation dit déjà "Annuler" — pas de collision possible avec
+  // "Annuler" en fermeture, voir `audit_modales.md`) ; passé explicitement à
+  // "Annuler" pour "Refuser ?", où le bouton de confirmation dit "Refuser",
+  // sans ce risque.
+  String dismissLabel = 'Retour',
   required Future<void> Function() action,
 }) async {
   final confirmed = await showDialog<bool>(
@@ -169,7 +170,7 @@ Future<void> _confirmAndRun(
       title: Text(title.toUpperCase()),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Retour')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(dismissLabel)),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
           onPressed: () => Navigator.pop(ctx, true),
@@ -308,14 +309,14 @@ class _ModifyRequestDialogState extends State<_ModifyRequestDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: const Text('MODIFIER LA DEMANDE'),
+      title: const Text('MODIFIER'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'La demande repassera en attente de validation du coach.',
+              'Repasse en attente de validation.',
               style: TextStyle(color: AppColors.mediumGrey),
             ),
             SizedBox(height: context.hp(12)),

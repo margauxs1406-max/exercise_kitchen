@@ -28,15 +28,12 @@ Future<void> showSlotActionsSheet(BuildContext context, SlotModel slot) async {
         children: [
           ListTile(
             leading: const Icon(Icons.edit, color: AppColors.black),
-            title: const Text('Modifier la date/l\'heure'),
+            title: const Text('Modifier'),
             onTap: () => Navigator.of(context).pop(_SlotAction.edit),
           ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: AppColors.orange),
-            title: const Text(
-              'Supprimer ce cours',
-              style: TextStyle(color: AppColors.orange),
-            ),
+            title: const Text('Supprimer', style: TextStyle(color: AppColors.orange)),
             onTap: () => Navigator.of(context).pop(_SlotAction.delete),
           ),
         ],
@@ -68,17 +65,12 @@ Future<void> _confirmAndDelete(BuildContext context, SlotModel slot) async {
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text(
-        (slot.type == 'workshop' ? 'Supprimer ce workshop ?' : 'Supprimer ce cours ?')
-            .toUpperCase(),
-      ),
+      title: Text('Supprimer ?'.toUpperCase()),
       content: Text(
         slot.registeredCount > 0
-            ? '« ${slot.courseTitle} » (${slot.startTime}–${slot.endTime}) a '
-                '${slot.registeredCount} inscrit(s) : il(s) ne verra/verront plus '
-                'ce créneau une fois supprimé.'
-            : 'Le cours « ${slot.courseTitle} » (${slot.startTime}–${slot.endTime}) '
-                'sera définitivement supprimé du planning.',
+            ? '« ${slot.courseTitle} » sera définitivement supprimé : les inscrit.e.s '
+                'ne verront plus ce créneau.'
+            : '« ${slot.courseTitle} » sera définitivement supprimé du planning.',
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
@@ -174,7 +166,7 @@ class _EditSlotDialogState extends State<_EditSlotDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier « ${widget.slot.courseTitle} »'.toUpperCase()),
+      title: Text('Modifier'.toUpperCase()),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -309,7 +301,7 @@ class _EditWorkshopDialogState extends State<_EditWorkshopDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier le workshop'.toUpperCase()),
+      title: Text('Modifier'.toUpperCase()),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

@@ -3,6 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/closure_model.dart';
+import '../../models/rekovery_closure_model.dart';
 import '../../models/rekovery_request_model.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
@@ -11,7 +12,9 @@ import '../../services/rekovery_repository.dart';
 import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
+import '../../widgets/closure_banner.dart';
 import '../../widgets/day_header.dart';
+import '../../widgets/rekovery_closed_day_card.dart';
 import '../../widgets/rekovery_request_actions_sheet.dart';
 import '../../widgets/rekovery_request_card.dart';
 import '../../widgets/rekovery_reserve_bar.dart';
@@ -77,121 +80,187 @@ class AdherentRekoveryScreen extends StatelessWidget {
             builder: (context, closuresSnapshot) {
               final closures = closuresSnapshot.data ?? const <ClosureModel>[];
 
-              return Column(
-                children: [
-                  if (user.isRekoverySoloOnly) _CreditsBanner(user: user),
-                  RekoveryReserveBar(closures: closures),
-                  Expanded(
-                    child: StreamBuilder<List<RekoveryRequestModel>>(
-                      // `watchAllRequests` (pas `watchMyRequests`) depuis le
-                      // 6 août 2026 : l'écran doit aussi montrer les
-                      // réservations des autres adhérents (voir doc de
-                      // classe ci-dessus) — le filtrage "propre demande vs
-                      // demande d'autrui" se fait ci-dessous, côté client.
-                      stream: rekoveryRepo.watchAllRequests(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        final today = _dayOf(DateTime.now());
-                        final visible = snapshot.data!
-                            .where((r) {
-                              final isOwn = r.adherentUid == uid;
-                              if (isOwn) {
-                                // Liste continue "à partir d'aujourd'hui" :
-                                // une demande passée disparaît, sauf si
-                                // elle est encore active (pending/proposed)
-                                // — ne devrait normalement pas arriver, mais
-                                // évite qu'une demande en attente de réponse
-                                // disparaisse par un simple décalage
-                                // d'horloge.
-                                return !_dayOf(r.date).isBefore(today) ||
-                                    r.status == RekoveryRequestStatus.pending ||
-                                    r.status == RekoveryRequestStatus.proposed;
+              // Fermetures Rekovery (21 août 2026, distinctes des fermetures
+              // de salle ci-dessus) — flux en direct (voir doc de
+              // `RekoveryRepository.watchAllClosures`), pour que le bandeau
+              // de réservation et les cartes "jour fermé" se mettent à jour
+              // dès qu'un coach en ajoute une.
+              return StreamBuilder<List<RekoveryClosureModel>>(
+                stream: rekoveryRepo.watchAllClosures(),
+                builder: (context, rekoveryClosuresSnapshot) {
+                  final rekoveryClosures =
+                      rekoveryClosuresSnapshot.data ?? const <RekoveryClosureModel>[];
+
+                  return Column(
+                    children: [
+                      if (user.isRekoverySoloOnly) _CreditsBanner(user: user),
+                      RekoveryReserveBar(closures: closures, rekoveryClosures: rekoveryClosures),
+                      Expanded(
+                        child: StreamBuilder<List<RekoveryRequestModel>>(
+                          // `watchAllRequests` (pas `watchMyRequests`) depuis le
+                          // 6 août 2026 : l'écran doit aussi montrer les
+                          // réservations des autres adhérents (voir doc de
+                          // classe ci-dessus) — le filtrage "propre demande vs
+                          // demande d'autrui" se fait ci-dessous, côté client.
+                          stream: rekoveryRepo.watchAllRequests(),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Center(child: CircularProgressIndicator());
+                            }
+                            final today = _dayOf(DateTime.now());
+                            final visible = snapshot.data!
+                                .where((r) {
+                                  final isOwn = r.adherentUid == uid;
+                                  if (isOwn) {
+                                    // Liste continue "à partir d'aujourd'hui" :
+                                    // une demande passée disparaît, sauf si
+                                    // elle est encore active (pending/proposed)
+                                    // — ne devrait normalement pas arriver, mais
+                                    // évite qu'une demande en attente de réponse
+                                    // disparaisse par un simple décalage
+                                    // d'horloge.
+                                    return !_dayOf(r.date).isBefore(today) ||
+                                        r.status == RekoveryRequestStatus.pending ||
+                                        r.status == RekoveryRequestStatus.proposed;
+                                  }
+                                  // Demande d'un AUTRE adhérent : seulement si
+                                  // "réservée" au sens propre (en attente ou
+                                  // confirmée) et pas déjà passée — jamais les
+                                  // refusées/annulées, ni les contre-
+                                  // propositions en cours (pas encore un vrai
+                                  // créneau retenu).
+                                  return !_dayOf(r.date).isBefore(today) &&
+                                      (r.status == RekoveryRequestStatus.pending ||
+                                          r.status == RekoveryRequestStatus.accepted);
+                                })
+                                .toList()
+                              ..sort((a, b) {
+                                final dateCompare = a.date.compareTo(b.date);
+                                return dateCompare != 0
+                                    ? dateCompare
+                                    : a.startTime.compareTo(b.startTime);
+                              });
+
+                            // Fermetures Rekovery à partir d'aujourd'hui, une
+                            // entrée par jour couvert — pour afficher une
+                            // carte "jour fermé" (voir doc de classe) sur
+                            // chacun, mélangée aux demandes du même jour.
+                            final closedByDay = <DateTime, List<RekoveryClosureModel>>{};
+                            for (final c in rekoveryClosures) {
+                              if (_dayOf(c.endDate).isBefore(today)) continue;
+                              var day =
+                                  _dayOf(c.startDate).isBefore(today) ? today : _dayOf(c.startDate);
+                              final lastDay = _dayOf(c.endDate);
+                              while (!day.isAfter(lastDay)) {
+                                closedByDay.putIfAbsent(day, () => []).add(c);
+                                day = day.add(const Duration(days: 1));
                               }
-                              // Demande d'un AUTRE adhérent : seulement si
-                              // "réservée" au sens propre (en attente ou
-                              // confirmée) et pas déjà passée — jamais les
-                              // refusées/annulées, ni les contre-
-                              // propositions en cours (pas encore un vrai
-                              // créneau retenu).
-                              return !_dayOf(r.date).isBefore(today) &&
-                                  (r.status == RekoveryRequestStatus.pending ||
-                                      r.status == RekoveryRequestStatus.accepted);
-                            })
-                            .toList()
-                          ..sort((a, b) {
-                            final dateCompare = a.date.compareTo(b.date);
-                            return dateCompare != 0
-                                ? dateCompare
-                                : a.startTime.compareTo(b.startTime);
-                          });
+                            }
 
-                        if (visible.isEmpty) {
-                          return const Center(
-                            child: Text('Aucune demande Rekovery pour le moment.'),
-                          );
-                        }
+                            // Fermetures DE LA SALLE (21 août 2026, demande
+                            // de Margaux : "les slots de fermetures de la
+                            // salle doivent apparaitre dans le planning
+                            // rekovery également") — même principe, un
+                            // `ClosureBanner` par jour couvert, affiché
+                            // au-dessus des éventuelles fermetures Rekovery
+                            // du même jour.
+                            final roomClosedByDay = <DateTime, List<ClosureModel>>{};
+                            for (final c in closures) {
+                              if (_dayOf(c.endDate).isBefore(today)) continue;
+                              var day =
+                                  _dayOf(c.startDate).isBefore(today) ? today : _dayOf(c.startDate);
+                              final lastDay = _dayOf(c.endDate);
+                              while (!day.isAfter(lastDay)) {
+                                roomClosedByDay.putIfAbsent(day, () => []).add(c);
+                                day = day.add(const Duration(days: 1));
+                              }
+                            }
 
-                        // Regroupement par jour (marqueur [DayHeader]), comme
-                        // le planning des cours — sans mélange avec des
-                        // créneaux ou fermetures ici.
-                        final items = <Object>[];
-                        DateTime? lastDay;
-                        for (final r in visible) {
-                          final day = _dayOf(r.date);
-                          if (lastDay == null || day != lastDay) {
-                            items.add(day);
-                            lastDay = day;
-                          }
-                          items.add(r);
-                        }
-
-                        return ListView.builder(
-                          padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
-                          itemCount: items.length,
-                          itemBuilder: (context, i) {
-                            final item = items[i];
-                            if (item is DateTime) {
-                              return DayHeader(
-                                date: item,
-                                isFirst: i == 0,
-                                firstTopPadding: context.hp(12),
+                            if (visible.isEmpty && closedByDay.isEmpty && roomClosedByDay.isEmpty) {
+                              return const Center(
+                                child: Text('Aucune demande Rekovery pour le moment.'),
                               );
                             }
-                            final request = item as RekoveryRequestModel;
-                            final isOwn = request.adherentUid == uid;
-                            final canAct = isOwn &&
-                                (request.status == RekoveryRequestStatus.pending ||
-                                    request.status == RekoveryRequestStatus.proposed ||
-                                    request.status == RekoveryRequestStatus.accepted);
-                            return RekoveryRequestCard(
-                              request: request,
-                              // Nom affiché sur toutes les cartes (y compris
-                              // les siennes) depuis le 6 août 2026 — voir
-                              // doc de classe ci-dessus.
-                              showName: true,
-                              isOwn: isOwn,
-                              // Couleurs par statut (10 août 2026, voir
-                              // `RekoveryRequestCard.colorByStatus`) : sans
-                              // effet sur les demandes des autres, `isOwn`
-                              // filtrant déjà en interne.
-                              colorByStatus: true,
-                              // Appui long uniquement (6 août 2026), et
-                              // seulement sur SA PROPRE demande : un simple
-                              // tap ne déclenche plus les actions (annulation
-                              // trop facile par accident), et personne ne
-                              // peut agir sur la réservation d'un(e) autre.
-                              onLongPress: canAct
-                                  ? () => showRekoveryRequestActionsSheet(context, request)
-                                  : null,
+
+                            // Regroupement par jour (marqueur [DayHeader]), comme
+                            // le planning des cours — fermeture de salle en tête
+                            // de chaque jour concerné, puis fermetures Rekovery,
+                            // puis demandes.
+                            final allDays = <DateTime>{
+                              ...visible.map((r) => _dayOf(r.date)),
+                              ...closedByDay.keys,
+                              ...roomClosedByDay.keys,
+                            }.toList()
+                              ..sort();
+
+                            final items = <Object>[];
+                            for (final day in allDays) {
+                              items.add(day);
+                              items.addAll(roomClosedByDay[day] ?? const []);
+                              items.addAll(closedByDay[day] ?? const []);
+                              items.addAll(visible.where((r) => _dayOf(r.date) == day));
+                            }
+
+                            return ListView.builder(
+                              padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
+                              itemCount: items.length,
+                              itemBuilder: (context, i) {
+                                final item = items[i];
+                                if (item is DateTime) {
+                                  return DayHeader(
+                                    date: item,
+                                    isFirst: i == 0,
+                                    firstTopPadding: context.hp(12),
+                                  );
+                                }
+                                if (item is ClosureModel) {
+                                  // Fermeture de salle — lecture seule ici
+                                  // (l'édition reste dans le planning
+                                  // principal, voir `weekly_planning_screen.dart`).
+                                  return ClosureBanner(closure: item);
+                                }
+                                if (item is RekoveryClosureModel) {
+                                  // Lecture seule côté adhérent (pas
+                                  // d'`onLongPress`) — seul le coach peut
+                                  // supprimer une fermeture Rekovery, voir
+                                  // `coach_rekovery_screen.dart`.
+                                  return RekoveryClosedDayCard(closure: item);
+                                }
+                                final request = item as RekoveryRequestModel;
+                                final isOwn = request.adherentUid == uid;
+                                final canAct = isOwn &&
+                                    (request.status == RekoveryRequestStatus.pending ||
+                                        request.status == RekoveryRequestStatus.proposed ||
+                                        request.status == RekoveryRequestStatus.accepted);
+                                return RekoveryRequestCard(
+                                  request: request,
+                                  // Nom affiché sur toutes les cartes (y compris
+                                  // les siennes) depuis le 6 août 2026 — voir
+                                  // doc de classe ci-dessus.
+                                  showName: true,
+                                  isOwn: isOwn,
+                                  // Couleurs par statut (10 août 2026, voir
+                                  // `RekoveryRequestCard.colorByStatus`) : sans
+                                  // effet sur les demandes des autres, `isOwn`
+                                  // filtrant déjà en interne.
+                                  colorByStatus: true,
+                                  // Appui long uniquement (6 août 2026), et
+                                  // seulement sur SA PROPRE demande : un simple
+                                  // tap ne déclenche plus les actions (annulation
+                                  // trop facile par accident), et personne ne
+                                  // peut agir sur la réservation d'un(e) autre.
+                                  onLongPress: canAct
+                                      ? () => showRekoveryRequestActionsSheet(context, request)
+                                      : null,
+                                );
+                              },
                             );
                           },
-                        );
-                      },
-                    ),
-                  ),
-                ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           );

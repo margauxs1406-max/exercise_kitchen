@@ -42,6 +42,10 @@
  *  - création/modification d'un workshop ou d'une fermeture, à tout le
  *    monde — `onSlotCreated`/`onSlotUpdated`/`onClosureCreated`/
  *    `onClosureUpdated` ;
+ *  - nouvelle fermeture Rekovery (espace Rekovery seul, pas toute la
+ *    salle), aux adhérents formule Rekovery — `onRekoveryClosureCreated`
+ *    (pas de notif si la salle est déjà fermée sur la même période, la
+ *    notif `onClosureCreated` ci-dessus suffit alors) ;
  *  - modification/suppression d'un cours duo/individuel, aux adhérents
  *    concernés — `onSlotUpdated`/`onSlotDeleted` ;
  *  - double inscription le même jour (hors Rekovery), à l'adhérent
@@ -825,6 +829,111 @@ export const cancelRegistration = onCall(
     }
 
     return result;
+  }
+);
+
+/**
+ * Coach uniquement. Appelée par `PlanningRepository.addClosure`/`updateClosure`
+ * juste avant de supprimer les créneaux couverts par une fermeture de salle
+ * (21 août 2026, bug corrigé — demande de Margaux : "je veux que la
+ * fermeture annule les réservations, que ce soit de cours ou de rekovery et
+ * réinitialise le compte à 0 si jamais des gens étaient inscrits").
+ *
+ * Sans cette fonction, les inscriptions (`registrations`) pointant vers un
+ * créneau supprimé par une fermeture devenaient orphelines : le créneau
+ * recréé (si la fermeture est ensuite réduite/supprimée) gardait l'ANCIEN
+ * `registeredCount`/`waitlistCount` (copié tel quel dans `removedSlots`),
+ * mais plus personne n'apparaissait dans la pop-up "inscrits" (qui
+ * interroge `registrations` par `slotId` — l'ancien `slotId` n'existe plus
+ * et le nouveau document recréé a un ID différent).
+ *
+ * [slotIds] : les créneaux (cours collectif/duo/individuel/workshop) sur le
+ * point d'être supprimés par la fermeture — leurs inscriptions sont
+ * supprimées définitivement (pas de recrédit : ce ne sont pas des séances
+ * Rekovery à carnet limité).
+ *
+ * [startDate]/[endDate] (ISO, UTC, jours entiers) : période couverte par la
+ * fermeture — toute demande Rekovery `pending`/`accepted`/`proposed` dont
+ * la date tombe dans cette période est annulée (statut `cancelled`), avec
+ * recrédit du carnet si elle était `accepted` et l'adhérent "Rekovery
+ * seul" — même logique que [cancelRekoveryRequest] ci-dessous.
+ */
+export const cancelReservationsForClosure = onCall(
+  { region: REGION },
+  async (request) => {
+    await requireCoach(request.auth?.uid);
+
+    const { slotIds, startDate, endDate } = request.data as {
+      slotIds?: string[];
+      startDate?: string;
+      endDate?: string;
+    };
+    if (!Array.isArray(slotIds) || !startDate || !endDate) {
+      throw new HttpsError("invalid-argument", "slotIds, startDate et endDate sont requis.");
+    }
+
+    // Suppression des inscriptions (`registrations`) pointant vers un des
+    // créneaux sur le point d'être supprimés — par lots de 30 (limite
+    // Firestore de `whereIn`).
+    let cancelledRegistrations = 0;
+    for (let i = 0; i < slotIds.length; i += 30) {
+      const chunk = slotIds.slice(i, i + 30);
+      if (chunk.length === 0) continue;
+      const snap = await db.collection("registrations").where("slotId", "in", chunk).get();
+      if (snap.empty) continue;
+      const batch = db.batch();
+      snap.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      cancelledRegistrations += snap.size;
+    }
+
+    // Annulation des demandes Rekovery actives sur la même période — un
+    // jour de plus (exclusif) sur `endDate` car [startDate]/[endDate] sont
+    // des jours entiers inclusifs.
+    const start = new Date(startDate);
+    const endExclusive = new Date(new Date(endDate).getTime() + 24 * 60 * 60 * 1000);
+    const rekoverySnap = await db
+      .collection("rekoveryRequests")
+      .where("date", ">=", admin.firestore.Timestamp.fromDate(start))
+      .where("date", "<", admin.firestore.Timestamp.fromDate(endExclusive))
+      .get();
+
+    let cancelledRekoveryRequests = 0;
+    for (const doc of rekoverySnap.docs) {
+      const data = doc.data();
+      if (data.status !== "pending" && data.status !== "accepted" && data.status !== "proposed") {
+        continue;
+      }
+      await db.runTransaction(async (tx) => {
+        const reqSnap = await tx.get(doc.ref);
+        if (!reqSnap.exists) return;
+        const reqData = reqSnap.data()!;
+        if (
+          reqData.status !== "pending" &&
+          reqData.status !== "accepted" &&
+          reqData.status !== "proposed"
+        ) {
+          return; // déjà traitée entretemps — idempotent.
+        }
+        // Une demande [accepted] avait décompté le carnet : on le
+        // recrédite si l'adhérent est "Rekovery seul" — même logique que
+        // [cancelRekoveryRequest].
+        if (reqData.status === "accepted") {
+          const userRef = db.collection("users").doc(reqData.adherentUid as string);
+          const userSnap = await tx.get(userRef);
+          const userData = userSnap.data();
+          const formulas = (userData?.formulas as string[] | undefined) ?? [];
+          if (isRekoverySoloOnly(formulas)) {
+            const remaining = (userData?.rekoveryCreditsRemaining as number | undefined) ?? 0;
+            tx.update(userRef, { rekoveryCreditsRemaining: remaining + 1 });
+          }
+        }
+        tx.update(doc.ref, { status: "cancelled" });
+      });
+      cancelledRekoveryRequests++;
+    }
+
+    return { cancelledRegistrations, cancelledRekoveryRequests };
   }
 );
 
@@ -1933,6 +2042,63 @@ export const onClosureUpdated = onDocumentUpdated(
       );
     } catch (err) {
       logger.error(`onClosureUpdated: échec pour ${event.params.closureId}`, err);
+    }
+  }
+);
+
+/**
+ * Nouvelle fermeture Rekovery (bouton "+" de `coach_rekovery_screen.dart`,
+ * 21 août 2026) → notifie les adhérents formule Rekovery — sauf si la salle
+ * est déjà fermée sur une période qui chevauche celle-ci : la notification
+ * `onClosureCreated` ci-dessus a alors déjà prévenu tout le monde, une
+ * seconde notification serait redondante ("Si la salle est fermée, pas de
+ * notif car il y a déjà celle de la salle fermée", demande de Margaux).
+ *
+ * Le message est entièrement composé côté serveur (pas de champ libre côté
+ * coach, contrairement aux fermetures de salle) : "L'espace Rekovery sera
+ * temporairement inaccessible le jeudi 10 août de 12h à 16h." pour une
+ * fermeture temporaire, ou "...du jeudi 10 août au mercredi 24 août." pour
+ * une fermeture prolongée.
+ */
+export const onRekoveryClosureCreated = onDocumentCreated(
+  { document: "rekoveryClosures/{closureId}", region: REGION },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    try {
+      const startDate = data.startDate as admin.firestore.Timestamp;
+      const endDate = data.endDate as admin.firestore.Timestamp;
+
+      // Fermetures de salle qui chevauchent la période de cette fermeture
+      // Rekovery — récupère tout plutôt qu'une requête filtrée (comme
+      // `PlanningRepository.fetchAllClosures` côté client) : une fermeture
+      // chevauche une plage sur DEUX champs, ce que Firestore ne permet pas
+      // nativement sans index composite, et leur nombre reste faible.
+      const roomClosuresSnap = await db.collection("closures").get();
+      const overlapsRoomClosure = roomClosuresSnap.docs.some((doc) => {
+        const c = doc.data();
+        const cStart = (c.startDate as admin.firestore.Timestamp).toDate().getTime();
+        const cEnd = (c.endDate as admin.firestore.Timestamp).toDate().getTime();
+        return cStart <= endDate.toDate().getTime() && cEnd >= startDate.toDate().getTime();
+      });
+      if (overlapsRoomClosure) return;
+
+      const title = (data.title as string) || "Rekovery temporairement inaccessible";
+      const isTemporary = data.isTemporary as boolean;
+      let body = isTemporary
+        ? `L'espace Rekovery sera temporairement inaccessible ${weekdayFullDate(startDate)} de ${formatTimeShort(data.startTime as string)} à ${formatTimeShort(data.endTime as string)}.`
+        : `L'espace Rekovery sera temporairement inaccessible du ${weekdayFullDate(startDate)} au ${weekdayFullDate(endDate)}.`;
+      // Message facultatif (21 août 2026, demande de Margaux) — ajouté à la
+      // suite du texte auto-généré ci-dessus, voir `RekoveryClosureModel.message`.
+      const message = data.message as string | undefined;
+      if (message && message.trim().length > 0) {
+        body = `${body} ${message.trim()}`;
+      }
+
+      const tokens = await getTokensForFormula("rekovery", [], "rekoveryClosureBroadcast");
+      await sendPushToTokens(tokens, title, body);
+    } catch (err) {
+      logger.error(`onRekoveryClosureCreated: échec pour ${event.params.closureId}`, err);
     }
   }
 );

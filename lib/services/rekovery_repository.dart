@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../models/rekovery_closure_model.dart';
 import '../models/rekovery_request_model.dart';
 
 /// Demandes Rekovery (onglet dédié — voir `rekovery_request_model.dart` pour
@@ -22,6 +23,9 @@ class RekoveryRepository {
 
   CollectionReference<Map<String, dynamic>> get _requests =>
       _firestore.collection('rekoveryRequests');
+
+  CollectionReference<Map<String, dynamic>> get _closures =>
+      _firestore.collection('rekoveryClosures');
 
   /// Adhérent : ses propres demandes, toutes confondues (pending, acceptées,
   /// proposées, refusées, annulées) — pas de flux ; le filtrage à
@@ -150,4 +154,110 @@ class RekoveryRepository {
       'startTime': startTime,
     });
   }
+
+  // -----------------------------------------------------------------
+  // Fermetures Rekovery (bouton "+" côté coach — 21 août 2026)
+  // -----------------------------------------------------------------
+
+  /// Coach ET adhérent : toutes les fermetures Rekovery existantes, triées
+  /// par date de début — flux en direct (contrairement à
+  /// `PlanningRepository.fetchAllClosures`, un simple aller-retour) pour que
+  /// le blocage de réservation ([RekoveryReserveBar]) et les cartes "jour
+  /// fermé" ([RekoveryClosedDayCard]) se mettent à jour immédiatement dès
+  /// qu'un coach ajoute une fermeture ("se mettre à jour si le coach
+  /// rajoute une fermeture rekovery", demande du 21 août 2026). Écriture
+  /// directe côté coach (pas de Cloud Function, contrairement aux
+  /// `rekoveryRequests` ci-dessus) : aucun décompte de carnet à protéger
+  /// ici, même principe que `closures` (fermetures de salle) — voir
+  /// `firestore.rules`.
+  Stream<List<RekoveryClosureModel>> watchAllClosures() {
+    return _closures
+        .orderBy('startDate')
+        .snapshots()
+        .map((snap) => snap.docs.map(RekoveryClosureModel.fromFirestore).toList());
+  }
+
+  /// Coach : ferme l'espace Rekovery pour quelques heures un jour précis
+  /// (option "Fermeture temporaire" de `add_rekovery_closure_screen.dart`).
+  /// [message] : facultatif (21 août 2026), voir `RekoveryClosureModel.message`.
+  Future<void> addTemporaryClosure({
+    required DateTime date,
+    required String startTime,
+    required String endTime,
+    required String title,
+    String? message,
+  }) {
+    final day = DateTime(date.year, date.month, date.day);
+    return _closures.add(
+      RekoveryClosureModel(
+        id: '',
+        startDate: day,
+        endDate: day,
+        title: title,
+        isTemporary: true,
+        startTime: startTime,
+        endTime: endTime,
+        message: message,
+        createdAt: DateTime.now(),
+      ).toFirestore(),
+    );
+  }
+
+  /// Coach : ferme l'espace Rekovery sur plusieurs jours entiers (option
+  /// "Fermeture prolongée" de `add_rekovery_closure_screen.dart`).
+  /// [message] : facultatif (21 août 2026), voir `RekoveryClosureModel.message`.
+  Future<void> addExtendedClosure({
+    required DateTime startDate,
+    required DateTime endDate,
+    required String title,
+    String? message,
+  }) {
+    final start = DateTime(startDate.year, startDate.month, startDate.day);
+    final end = DateTime(endDate.year, endDate.month, endDate.day);
+    return _closures.add(
+      RekoveryClosureModel(
+        id: '',
+        startDate: start,
+        endDate: end,
+        title: title,
+        isTemporary: false,
+        message: message,
+        createdAt: DateTime.now(),
+      ).toFirestore(),
+    );
+  }
+
+  /// Coach : modifie une fermeture Rekovery déjà créée (appui long sur sa
+  /// carte, action "Modifier" — 21 août 2026, demande de Margaux, voir
+  /// `rekovery_closure_actions_sheet.dart`). La forme ([isTemporary]) n'est
+  /// pas modifiable ici (recréer via le bouton "+" reste plus simple que de
+  /// faire basculer un formulaire d'édition entre les deux formes très
+  /// différentes) — seuls le créneau (date+heures ou période), le titre et
+  /// le message le sont. [startTime]/[endTime] sont ignorés pour une
+  /// fermeture prolongée (jamais écrits, restent `null` en base).
+  Future<void> updateClosure({
+    required String closureId,
+    required bool isTemporary,
+    required DateTime startDate,
+    required DateTime endDate,
+    String? startTime,
+    String? endTime,
+    required String title,
+    String? message,
+  }) {
+    final start = DateTime(startDate.year, startDate.month, startDate.day);
+    final end = DateTime(endDate.year, endDate.month, endDate.day);
+    return _closures.doc(closureId).update({
+      'startDate': Timestamp.fromDate(start),
+      'endDate': Timestamp.fromDate(isTemporary ? start : end),
+      'title': title,
+      'startTime': isTemporary ? startTime : null,
+      'endTime': isTemporary ? endTime : null,
+      'message': message,
+    });
+  }
+
+  /// Coach : supprime une fermeture Rekovery (appui long sur sa carte, voir
+  /// `rekovery_closure_actions_sheet.dart`).
+  Future<void> deleteClosure(String closureId) => _closures.doc(closureId).delete();
 }

@@ -19,17 +19,14 @@ Future<void> showClosureActionsSheet(BuildContext context, ClosureModel closure)
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile( 
+          ListTile(
             leading: const Icon(Icons.edit, color: AppColors.black),
-            title: const Text('Modifier la période/le message'),
+            title: const Text('Modifier'),
             onTap: () => Navigator.of(context).pop(_ClosureAction.edit),
           ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: AppColors.orange),
-            title: const Text(
-              'Supprimer cette fermeture',
-              style: TextStyle(color: AppColors.orange),
-            ),
+            title: const Text('Supprimer', style: TextStyle(color: AppColors.orange)),
             onTap: () => Navigator.of(context).pop(_ClosureAction.delete),
           ),
         ],
@@ -55,18 +52,21 @@ Future<void> showClosureActionsSheet(BuildContext context, ClosureModel closure)
 enum _ClosureAction { edit, delete }
 
 Future<void> _confirmAndDelete(BuildContext context, ClosureModel closure) async {
+  // Le message est facultatif depuis le 21 août 2026 (voir doc de
+  // `_EditClosureDialog._save`) : on retombe sur "cette fermeture" plutôt
+  // que d'afficher des guillemets vides s'il n'a pas été renseigné.
+  final label = closure.message.trim().isEmpty ? 'cette fermeture' : '« ${closure.message} »';
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Supprimer cette fermeture ?'.toUpperCase()),
+      title: Text('Supprimer ?'.toUpperCase()),
       content: Text(
         closure.removedSlots.isEmpty
-            ? 'La fermeture « ${closure.message} » sera définitivement supprimée du planning.'
-            : 'La fermeture « ${closure.message} » sera supprimée, et les '
-                '${closure.removedSlots.length} cours qu\'elle avait annulés seront restaurés '
-                'dans le planning.',
+            ? 'La fermeture $label sera définitivement supprimée.'
+            : 'La fermeture $label sera définitivement supprimée — '
+                '${closure.removedSlots.length} cours annulé.s seront restaurés.',
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
@@ -154,11 +154,8 @@ class _EditClosureDialogState extends State<_EditClosureDialog> {
   }
 
   Future<void> _save() async {
-    if (_messageController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Le message ne peut pas être vide.')));
-      return;
-    }
+    // Message facultatif depuis le 21 août 2026 (demande de Margaux) — plus
+    // aucune validation ici, contrairement à avant.
     setState(() => _submitting = true);
     try {
       await context.read<PlanningRepository>().updateClosure(
@@ -182,7 +179,7 @@ class _EditClosureDialogState extends State<_EditClosureDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier la fermeture'.toUpperCase()),
+      title: Text('Modifier'.toUpperCase()),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -129,6 +129,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // --- rekoveryClosures ---
+    // Fermetures ponctuelles de L'ESPACE REKOVERY seul (bouton "+" de
+    // `coach_rekovery_screen.dart`, 21 août 2026) — à ne pas confondre avec
+    // `closures` ci-dessus, qui ferme toute la salle. Écriture DIRECTE côté
+    // client par un coach (pas de Cloud Function) : aucun décompte de carnet
+    // à protéger ici, contrairement à `rekoveryRequests` — même principe
+    // que `closures`. Lecture ouverte à tout utilisateur actif (coach ET
+    // adhérents), affichée dans les deux écrans Rekovery.
+    match /rekoveryClosures/{closureId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveCoach();
+    }
+
     // --- registrations ---
     // Écritures exclusivement via les Cloud Functions `registerForSlot` /
     // `cancelRegistration` (Admin SDK, qui contourne ces règles).

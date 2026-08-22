@@ -7,6 +7,7 @@ import '../../services/biometric_auth_service.dart';
 import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
+import '../../widgets/underlined_link.dart';
 import 'faq_screen.dart';
 import 'notification_settings_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -208,7 +209,7 @@ class _ProfileBody extends StatelessWidget {
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: const _UnderlinedOrangeText('Modifier'),
+                      child: const UnderlinedLink('Modifier', color: AppColors.orange),
                     ),
                   ],
                 ),
@@ -239,7 +240,7 @@ class _ProfileBody extends StatelessWidget {
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: const _UnderlinedOrangeText('Modifier'),
+                      child: const UnderlinedLink('Modifier', color: AppColors.orange),
                     ),
                   ],
                 ),
@@ -263,7 +264,7 @@ class _ProfileBody extends StatelessWidget {
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: const _UnderlinedOrangeText('Modifier'),
+                      child: const UnderlinedLink('Modifier', color: AppColors.orange),
                     ),
                   ],
                 ),
@@ -330,10 +331,7 @@ class _ProfileBody extends StatelessWidget {
           child: GestureDetector(
             onTap: () => _signOut(context),
             behavior: HitTestBehavior.opaque,
-            child: const _UnderlinedOrangeText(
-              'Se déconnecter',
-              fontWeight: FontWeight.w600,
-            ),
+            child: const UnderlinedLink('Se déconnecter', color: AppColors.orange),
           ),
         ),
         SizedBox(height: context.hp(16)),
@@ -349,28 +347,6 @@ class _ProfileBody extends StatelessWidget {
 // _kTextSize à la taille par défaut de leur titre (16).
 double _kIconSize(BuildContext context) => context.wp(24);
 double _kTextSize(BuildContext context) => context.sp(16);
-
-/// Texte orange souligné (soulignement natif) utilisé pour les boutons
-/// "Modifier" et "Se déconnecter".
-class _UnderlinedOrangeText extends StatelessWidget {
-  final String text;
-  final FontWeight? fontWeight;
-  const _UnderlinedOrangeText(this.text, {this.fontWeight});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: _kTextSize(context),
-        color: AppColors.orange,
-        fontWeight: fontWeight,
-        decoration: TextDecoration.underline,
-        decorationColor: AppColors.orange,
-      ),
-    );
-  }
-}
 
 class _InfoLine extends StatelessWidget {
   final IconData icon;
@@ -444,7 +420,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier le mot de passe'.toUpperCase()),
+      title: Text('Changer'.toUpperCase()),
       content: Form(
         key: _formKey,
         child: Column(
@@ -492,7 +468,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             ),
             if (_error != null) ...[
               SizedBox(height: context.hp(12)),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
+              Text(_error!, style: const TextStyle(color: AppColors.flashyRed)),
             ],
           ],
         ),
@@ -510,7 +486,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
                   width: context.wp(18),
                   child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : const Text('Valider'),
+              : const Text('Enregistrer'),
         ),
       ],
     );
@@ -568,7 +544,7 @@ class _EditNameDialogState extends State<_EditNameDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier le nom'.toUpperCase()),
+      title: Text('Modifier'.toUpperCase()),
       content: Form(
         key: _formKey,
         child: Column(
@@ -587,7 +563,7 @@ class _EditNameDialogState extends State<_EditNameDialog> {
             ),
             if (_error != null) ...[
               SizedBox(height: context.hp(12)),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
+              Text(_error!, style: const TextStyle(color: AppColors.flashyRed)),
             ],
           ],
         ),
@@ -605,7 +581,7 @@ class _EditNameDialogState extends State<_EditNameDialog> {
                   width: context.wp(18),
                   child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : const Text('Valider'),
+              : const Text('Enregistrer'),
         ),
       ],
     );
@@ -656,7 +632,7 @@ class _EditPhoneDialogState extends State<_EditPhoneDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: Text('Modifier le numéro'.toUpperCase()),
+      title: Text('Modifier'.toUpperCase()),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -667,7 +643,7 @@ class _EditPhoneDialogState extends State<_EditPhoneDialog> {
           ),
           if (_error != null) ...[
             SizedBox(height: context.hp(12)),
-            Text(_error!, style: const TextStyle(color: Colors.red)),
+            Text(_error!, style: const TextStyle(color: AppColors.flashyRed)),
           ],
         ],
       ),
@@ -684,7 +660,7 @@ class _EditPhoneDialogState extends State<_EditPhoneDialog> {
                   width: context.wp(18),
                   child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : const Text('Valider'),
+              : const Text('Enregistrer'),
         ),
       ],
     );

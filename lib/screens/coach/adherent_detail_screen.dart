@@ -6,6 +6,7 @@ import '../../models/user_model.dart';
 import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
+import '../../widgets/underlined_link.dart';
 import 'adherent_photos_screen.dart';
 import 'adherent_rekovery_history_screen.dart';
 
@@ -71,7 +72,7 @@ class _AdherentDetailBody extends StatelessWidget {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Modifier le numéro de téléphone'.toUpperCase()),
+        title: Text('Modifier'.toUpperCase()),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -109,7 +110,11 @@ class _AdherentDetailBody extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.white,
         surfaceTintColor: Colors.transparent,
-        title: const Text('CARNET REKOVERY'),
+        // Titre volontairement réduit à un seul verbe précis, sans "Carnet
+        // Rekovery" en COD (22 août 2026, demande explicite de Margaux) : le
+        // contenu de la pop-up (champ "Séances restantes") suffit à situer
+        // l'action, pas besoin d'un titre plus long.
+        title: const Text('CRÉDITER'),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -134,12 +139,10 @@ class _AdherentDetailBody extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(
-          (adherent.isActive ? 'Clôturer ce compte ?' : 'Réactiver ce compte ?').toUpperCase(),
-        ),
+        title: Text((adherent.isActive ? 'Clôturer ?' : 'Réactiver ?').toUpperCase()),
         content: Text(adherent.isActive
-            ? "${adherent.fullName} ne pourra plus se connecter à l'application."
-            : "${adherent.fullName} pourra à nouveau se connecter à l'application."),
+            ? "${adherent.fullName} ne pourra plus se connecter."
+            : "${adherent.fullName} pourra à nouveau se connecter."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -147,7 +150,7 @@ class _AdherentDetailBody extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmer'),
+            child: Text(adherent.isActive ? 'Clôturer' : 'Réactiver'),
           ),
         ],
       ),
@@ -190,10 +193,13 @@ class _AdherentDetailBody extends StatelessWidget {
                         children: [
                           Icon(Icons.check_circle, color: AppColors.flashyGreen, size: context.wp(18)),
                           SizedBox(width: context.wp(4)),
-                          const Text(
+                          Text(
                             'Actif',
                             style: TextStyle(
-                                color: AppColors.flashyGreen, fontWeight: FontWeight.w600),
+                              color: AppColors.flashyGreen,
+                              fontWeight: FontWeight.w600,
+                              fontSize: context.sp(12),
+                            ),
                           ),
                         ],
                       ),
@@ -234,14 +240,9 @@ class _AdherentDetailBody extends StatelessWidget {
                   child: GestureDetector(
                     onTap: () => _toggleAccountStatus(context),
                     behavior: HitTestBehavior.opaque,
-                    child: Text(
+                    child: UnderlinedLink(
                       adherent.isActive ? 'Clôturer ce compte' : 'Réactiver ce compte',
-                      style: const TextStyle(
-                        color: AppColors.orange,
-                        fontWeight: FontWeight.w600,
-                        decoration: TextDecoration.underline,
-                        decorationColor: AppColors.orange,
-                      ),
+                      color: AppColors.orange,
                     ),
                   ),
                 ),

@@ -39,7 +39,7 @@ Future<void> showCoachRekoveryActionsSheet(
               ),
               ListTile(
                 leading: const Icon(Icons.swap_horiz, color: AppColors.black),
-                title: const Text('Proposer un autre créneau'),
+                title: const Text('Proposer'),
                 onTap: () => Navigator.of(context).pop(_CoachAction.propose),
               ),
               ListTile(
@@ -65,7 +65,7 @@ Future<void> showCoachRekoveryActionsSheet(
         case _CoachAction.refuse:
           await _promptNoteAndRun(
             context,
-            title: 'Refuser cette demande ?',
+            title: 'Refuser ?',
             confirmLabel: 'Refuser',
             action: (note) => repo.refuseRequest(request.id, note: note),
           );
@@ -88,10 +88,9 @@ Future<void> showCoachRekoveryActionsSheet(
         builder: (ctx) => AlertDialog(
           backgroundColor: AppColors.white,
           surfaceTintColor: Colors.transparent,
-          title: const Text('ANNULER CETTE RÉSERVATION ?'),
+          title: const Text('ANNULER ?'),
           content: Text(
-            '${request.adherentName} sera prévenu.e. Si son carnet est limité, '
-            'la séance lui sera recréditée.',
+            '${request.adherentName} sera prévenu.e et recrédité.e si son carnet est limité.',
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Retour')),
@@ -135,7 +134,7 @@ Future<void> _promptNoteAndRun(
         decoration: const InputDecoration(labelText: 'Motif (facultatif, visible par l\'adhérent)'),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Retour')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
           onPressed: () => Navigator.pop(ctx, true),
@@ -232,7 +231,7 @@ class _ProposeAlternativeDialogState extends State<_ProposeAlternativeDialog> {
     return AlertDialog(
       backgroundColor: AppColors.white,
       surfaceTintColor: Colors.transparent,
-      title: const Text('PROPOSER UN AUTRE CRÉNEAU'),
+      title: const Text('PROPOSER'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

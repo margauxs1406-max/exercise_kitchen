@@ -156,10 +156,14 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
     // REMPLACE, il ne s'ajoute pas en plus.
     final risksCancellation = !isWaitlisted && slot.registeredCount == 2;
 
-    final title = risksCancellation ? 'ATTENTION' : 'SE DÉSINSCRIRE ?';
+    // Titre unifié le 22 août 2026 (rationalisation des modales, demande de
+    // Margaux) : "ATTENTION" (ni verbe ni "?", seul titre de l'app à ne pas
+    // suivre la convention "Verbe ?") devient le même titre que le cas
+    // normal — la mise en garde reste dans le contenu, qui suffit à la faire
+    // ressortir.
+    const title = 'SE DÉSINSCRIRE ?';
     final message = risksCancellation
-        ? "Le cours n'aura plus qu'un seul inscrit et risque d'être annulé, "
-            "es-tu sûre de vouloir te désinscrire ?"
+        ? "Le cours n'aura plus qu'un.e seul.e inscrit.e et risque d'être annulé."
         : (isWaitlisted
             ? 'Tu quitteras la liste d\'attente de « ${slot.courseTitle} » '
                 '(${slot.startTime}–${slot.endTime}).'

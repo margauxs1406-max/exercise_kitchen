@@ -10,6 +10,7 @@ import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import '../../widgets/labeled_text_field.dart';
+import '../../widgets/underlined_link.dart';
 import 'forgot_password_screen.dart';
 
 /// Clé utilisée pour mémoriser le dernier email de connexion sur l'appareil
@@ -252,19 +253,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                     MaterialPageRoute(
                                         builder: (_) => const ForgotPasswordScreen()),
                                   ),
-                                  child: const Text(
+                                  child: const UnderlinedLink(
                                     'Mot de passe oublié ?',
-                                    style: TextStyle(
-                                      color: AppColors.white,
-                                      decoration: TextDecoration.underline,
-                                      decorationColor: AppColors.white,
-                                    ),
+                                    color: AppColors.white,
                                   ),
                                 ),
                               ),
                               if (_error != null) ...[
                                 SizedBox(height: context.hp(4)),
-                                Text(_error!, style: const TextStyle(color: Colors.red)),
+                                Text(_error!, style: const TextStyle(color: AppColors.flashyRed)),
                               ],
                               SizedBox(height: context.hp(16)),
                               ElevatedButton(
@@ -294,13 +291,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                           child: const CircularProgressIndicator(
                                               strokeWidth: 2, color: AppColors.white),
                                         )
-                                      : const Text(
+                                      : const UnderlinedLink(
                                           'Activer la biométrie',
-                                          style: TextStyle(
-                                            color: AppColors.white,
-                                            decoration: TextDecoration.underline,
-                                            decorationColor: AppColors.white,
-                                          ),
+                                          color: AppColors.white,
                                         ),
                                 ),
                               ),

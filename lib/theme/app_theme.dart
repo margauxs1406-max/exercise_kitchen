@@ -12,11 +12,11 @@ class AppColors {
   static const Color lightGrey = Color(0xFFF2F2F2); // Fonds de sections, cartes
   static const Color mediumGrey = Color(0xFF8C8C8C); // Textes secondaires, bordures
   static const Color orange = Color(0xFFFF6B35); // CTA, badges, alertes importantes
-  // Couleur exacte fournie par Margaux le 10 août 2026 (remplace
-  // 0xFF41D952, très proche) — Statut "Actif" (texte + coche), icônes
-  // "confirmé" pleines (carrés du récap, avatars `SlotCard`/
-  // `RekoveryRequestCard`).
-  static const Color flashyGreen = Color(0xFF41C450);
+  // Couleur exacte fournie par Margaux — Statut "Actif" (texte + coche),
+  // icônes "confirmé" pleines (carrés du récap, avatars `SlotCard`/
+  // `RekoveryRequestCard`). Mise à jour une 2e fois le 21 août 2026
+  // (0xFF41C450 → 0xFF35BC43, valeur exacte fournie par Margaux).
+  static const Color flashyGreen = Color(0xFF35BC43);
   static const Color mustardYellow = Color(0xFFCFB93B); // Statut "En attente" (texte + icône)
   static const Color darkGrey = Color(0xFF5C5C5C); // Statut "Clôturé" (texte + croix), sans fond ni contour
   // Couleurs "claires" ajoutées le 10 août 2026 (demande de Margaux) :
@@ -41,7 +41,9 @@ class AppColors {
   // `functions/src/index.ts`), mais ce rouge est un signal visuel
   // IMMÉDIAT dans le planning, distinct du push envoyé une seule fois.
   static const Color lightRed = Color(0xFFFECCCC); // Fond de carte "risque d'annulation"
-  static const Color flashyRed = Color(0xFFF80101); // Icône + nombre d'inscrits, même cas
+  // Mis à jour le 21 août 2026 (0xFFF80101 → 0xFFDD1111, valeur exacte
+  // fournie par Margaux).
+  static const Color flashyRed = Color(0xFFDD1111); // Icône + nombre d'inscrits, même cas
 }
 
 class AppTheme {
@@ -218,7 +220,11 @@ class AppTheme {
           foregroundColor: AppColors.white,
           padding: EdgeInsets.symmetric(horizontal: context.wp(24), vertical: context.hp(14)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(context.wp(10))),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+          // Section design (22 août 2026, rationalisation des polices,
+          // demande de Margaux) : "Texte de bouton" du système à 8 styles —
+          // formalise dans le code une règle déjà appliquée dans les faits
+          // (Poppins volontairement exclu des boutons).
+          textStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: context.sp(14)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -240,11 +246,30 @@ class AppTheme {
         ),
         contentPadding: EdgeInsets.symmetric(horizontal: context.wp(16), vertical: context.hp(14)),
       ),
-      textTheme: const TextTheme(
-        titleLarge: TextStyle(fontWeight: FontWeight.bold, color: AppColors.black),
-        titleMedium: TextStyle(fontWeight: FontWeight.w600, color: AppColors.black),
-        bodyMedium: TextStyle(color: AppColors.black),
-        bodySmall: TextStyle(color: AppColors.mediumGrey),
+      // Section design (22 août 2026, rationalisation des polices, demande
+      // de Margaux — voir `audit_polices.md`) : les 4 styles ci-dessous
+      // n'avaient jusque-là AUCUNE taille propre (héritée du défaut Material,
+      // non responsive) — chacun reçoit désormais une taille `context.sp()`
+      // fixe, alignée sur le système à 8 styles proposé dans l'audit.
+      textTheme: TextTheme(
+        // "Titre de carte", en plus grand/gras — nom complet en tête de
+        // fiche adhérent (seul usage de titleLarge dans l'app).
+        titleLarge: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: AppColors.black,
+          fontSize: context.sp(20),
+        ),
+        // "Titre de carte" (système à 8 styles) : "Formules", "Carnet
+        // Rekovery", "Historique Rekovery", "Photos de progression"...
+        titleMedium: TextStyle(
+          fontWeight: FontWeight.w600,
+          color: AppColors.black,
+          fontSize: context.sp(16),
+        ),
+        // "Texte secondaire" (système à 8 styles), variante noire.
+        bodyMedium: TextStyle(color: AppColors.black, fontSize: context.sp(14)),
+        // "Texte secondaire" (système à 8 styles), variante grise.
+        bodySmall: TextStyle(color: AppColors.mediumGrey, fontSize: context.sp(12)),
       ),
     );
   }
