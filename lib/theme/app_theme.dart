@@ -180,10 +180,10 @@ class AppTheme {
         color: AppColors.white,
         surfaceTintColor: Colors.transparent,
       ),
-      menuTheme: MenuThemeData(
+      menuTheme: const MenuThemeData(
         style: MenuStyle(
-          backgroundColor: const WidgetStatePropertyAll(AppColors.white),
-          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          backgroundColor: WidgetStatePropertyAll(AppColors.white),
+          surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
         ),
       ),
       bottomSheetTheme: const BottomSheetThemeData(

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/biometric_auth_service.dart';
+import '../../services/credential_store.dart';
 import '../../services/user_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
@@ -144,6 +145,11 @@ class _ProfileBody extends StatelessWidget {
   Future<void> _onBiometricSwitchChanged(BuildContext context, bool enabled) async {
     if (!enabled) {
       await repo.updateBiometricUnlockEnabled(user.uid, false);
+      // 27 août 2026 : efface aussi les identifiants stockés pour la
+      // reconnexion silencieuse (voir `credential_store.dart`) — désactiver
+      // ce switch doit vraiment désactiver la biométrie, y compris pour la
+      // reconnexion automatique après fermeture complète de l'app.
+      await CredentialStore().clear();
       return;
     }
     final biometric = BiometricAuthService();
@@ -271,7 +277,7 @@ class _ProfileBody extends StatelessWidget {
                 Divider(height: context.hp(24)),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  activeColor: AppColors.orange,
+                  activeThumbColor: AppColors.orange,
                   title: const Text('Déverrouillage biométrique'),
                   // Verrouille l'app (voir `AppLockGate`) à chaque lancement
                   // "à froid" (app fermée puis rouverte) — pas de nouvelle

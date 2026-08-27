@@ -65,7 +65,7 @@ class AdherentRekoveryScreen extends StatelessWidget {
         onProfileTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const AdherentProfileScreen()),
         ),
-        weekTypeContent: Text('REKOVERY', style: AppTheme.headerTitleStyle),
+        weekTypeContent: const Text('REKOVERY', style: AppTheme.headerTitleStyle),
       ),
       body: StreamBuilder<UserModel?>(
         stream: userRepo.watchUser(uid),

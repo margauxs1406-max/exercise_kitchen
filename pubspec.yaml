@@ -35,6 +35,12 @@ dependencies:
   firebase_messaging: ^15.2.10
   flutter_svg: ^2.3.0
   local_auth: ^3.0.2
+  # Ajouté le 27 août 2026 (contournement du bug connu du SDK Firebase Auth
+  # Android — perte de session au lancement à froid après fermeture complète,
+  # voir `credential_store.dart`) : stockage chiffré matériellement (Android
+  # Keystore / iOS Keychain), jamais en clair — utilisé UNIQUEMENT pour
+  # permettre une reconnexion silencieuse protégée par la biométrie.
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:

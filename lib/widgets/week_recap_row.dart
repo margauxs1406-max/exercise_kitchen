@@ -306,7 +306,7 @@ class _SplitSquarePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final topLeft = Offset.zero;
+    const topLeft = Offset.zero;
     final topRight = Offset(size.width, 0);
     final bottomRight = Offset(size.width, size.height);
     final bottomLeft = Offset(0, size.height);

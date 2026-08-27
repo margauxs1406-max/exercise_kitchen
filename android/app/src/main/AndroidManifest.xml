@@ -2,6 +2,18 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- Restreint l'app aux smartphones, exclut les tablettes (24 août 2026,
+         demande de Margaux). Note : ces attributs historiques (small/normal/
+         large/xlargeScreens) sont ignorés par le système à l'exécution — ils
+         servent uniquement au filtrage de distribution sur Google Play, et
+         Google recommande depuis Android 3.2 android:requiresSmallestWidthDp
+         à la place, jugé plus fiable aujourd'hui (voir doc de suivi du
+         projet pour le détail). -->
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="false"
+        android:xlargeScreens="false"/>
     <application
         android:label="Exercise Kitchen"
         android:name="${applicationName}"

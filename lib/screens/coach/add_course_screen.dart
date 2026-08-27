@@ -197,6 +197,10 @@ class _AddCourseTabState extends State<_AddCourseTab> {
     setState(() => _submitting = true);
     try {
       final repo = context.read<PlanningRepository>();
+      // Récupéré ici, avant le premier `await`, plutôt que dans la branche
+      // `else` ci-dessous après un `await` (voir `use_build_context_synchronously`,
+      // corrigé le 27 août 2026 sur le même principe que `login_screen.dart`).
+      final registrationRepo = context.read<RegistrationRepository>();
       if (_kind == 'individuel') {
         await repo.addIndividualSlot(
           date: _selectedDate!,
@@ -207,7 +211,6 @@ class _AddCourseTabState extends State<_AddCourseTab> {
       } else {
         final slotId =
             await repo.addDuoSlotForWeek(date: _selectedDate!, startTime: _fmt(_startTime!));
-        final registrationRepo = context.read<RegistrationRepository>();
         for (final uid in [_duoAdherent1Uid, _duoAdherent2Uid]) {
           if (uid == null) continue;
           await registrationRepo.coachRegisterAdherentForSlot(
@@ -417,7 +420,7 @@ class _AdherentPickerState extends State<_AdherentPicker> {
       // l'animation d'ouverture/fermeture : le menu apparaît/disparaît
       // instantanément, ce qui élimine ce décalage puisqu'il n'y a plus de
       // période de transition pendant laquelle il pourrait être visible.
-      popUpAnimationStyle: AnimationStyle(duration: Duration.zero, reverseDuration: Duration.zero),
+      popUpAnimationStyle: const AnimationStyle(duration: Duration.zero, reverseDuration: Duration.zero),
       items: items,
     );
     if (uid == null) return;

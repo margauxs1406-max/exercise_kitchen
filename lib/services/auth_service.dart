@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/user_model.dart';
+import 'credential_store.dart';
 
 /// Version courante de la politique de confidentialité présentée à l'écran
 /// de consentement (section 2 des spécifications). Incrémenter cette valeur
@@ -14,14 +15,16 @@ const String kPrivacyPolicyVersion = '1.0';
 /// (section 3) : connexion, changement du mot de passe temporaire imposé à
 /// la première connexion, et enregistrement du consentement RGPD.
 class AuthService extends ChangeNotifier {
-  AuthService({FirebaseAuth? auth, FirebaseFirestore? firestore})
+  AuthService({FirebaseAuth? auth, FirebaseFirestore? firestore, CredentialStore? credentialStore})
       : _auth = auth ?? FirebaseAuth.instance,
-        _firestore = firestore ?? FirebaseFirestore.instance {
+        _firestore = firestore ?? FirebaseFirestore.instance,
+        _credentialStore = credentialStore ?? CredentialStore() {
     _auth.authStateChanges().listen(_onAuthStateChanged);
   }
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
+  final CredentialStore _credentialStore;
 
   User? _firebaseUser;
   UserModel? _currentUser;
@@ -69,7 +72,15 @@ class AuthService extends ChangeNotifier {
     return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
-  Future<void> signOut() => _auth.signOut();
+  /// Efface aussi les identifiants stockés pour la reconnexion biométrique
+  /// silencieuse (27 août 2026, voir `credential_store.dart`) : une
+  /// déconnexion manuelle doit rester une vraie déconnexion — sans ça, la
+  /// personne se retrouverait reconnectée automatiquement au lancement
+  /// suivant malgré elle.
+  Future<void> signOut() async {
+    await _credentialStore.clear();
+    await _auth.signOut();
+  }
 
   /// Première connexion obligatoire : l'adhérent (ou le coach) doit
   /// remplacer le mot de passe temporaire par un mot de passe personnel.

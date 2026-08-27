@@ -137,7 +137,7 @@ class NotificationSettingsScreen extends StatelessWidget {
               final enabled = user.notificationPrefs[type.key] ?? true;
               return SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                activeColor: AppColors.orange,
+                activeThumbColor: AppColors.orange,
                 title: Text(type.label, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(type.description),
                 value: enabled,

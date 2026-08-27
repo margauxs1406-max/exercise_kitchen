@@ -4,13 +4,13 @@ import 'package:provider/provider.dart';
 import '../models/user_model.dart';
 import '../screens/auth/change_password_screen.dart';
 import '../screens/auth/consent_screen.dart';
-import '../screens/auth/login_screen.dart';
 import '../screens/coach/coach_home_screen.dart';
 import '../screens/adherent/adherent_home_screen.dart';
 import '../services/auth_service.dart';
 import '../services/push_notification_service.dart';
 import '../theme/app_theme.dart';
 import 'app_lock_gate.dart';
+import 'cold_start_relogin_screen.dart';
 
 /// Point d'entrée unique de navigation : redirige vers le bon écran selon
 /// l'état d'authentification et le parcours "compte fermé" (section 3) :
@@ -50,7 +50,12 @@ class _RoleGateState extends State<RoleGate> {
     }
 
     if (!auth.isSignedIn) {
-      return const LoginScreen();
+      // 27 août 2026 : `ColdStartReloginScreen` tente d'abord une
+      // reconnexion silencieuse via des identifiants biométriques stockés
+      // (contournement d'un bug Firebase Auth Android, voir sa doc de
+      // classe) et retombe sur `LoginScreen` si rien à tenter — donc aucun
+      // changement de comportement pour qui n'utilise pas la biométrie.
+      return const ColdStartReloginScreen();
     }
 
     final user = auth.currentUser;

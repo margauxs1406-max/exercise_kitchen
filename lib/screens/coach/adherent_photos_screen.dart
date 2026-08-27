@@ -42,9 +42,20 @@ class _AdherentPhotosScreenState extends State<AdherentPhotosScreen> {
   Future<void> _importFromCamera() async {
     // `imageQuality: 85` : compression légère à la source, pour limiter le
     // poids uploadé (photos de progression prises régulièrement, pas besoin
-    // du fichier brut de l'appareil).
-    final photo =
-        await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 85);
+    // du fichier brut de l'appareil). `maxWidth`/`maxHeight` ajoutés le 24
+    // août 2026 (demande de Margaux, chargement de la galerie trop lent) :
+    // `imageQuality` seul ne réduit QUE la qualité JPEG, pas les dimensions
+    // — un appareil photo récent peut sortir des photos de 3000-4000px de
+    // large, largement au-dessus de ce qu'affiche l'app (voir aussi le
+    // `cacheWidth` ajouté côté vignettes dans `photo_gallery_grid.dart`).
+    // 1600px de large reste largement suffisant pour la visionneuse plein
+    // écran (`_FullScreenPhotoGallery`) sur n'importe quel téléphone.
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (photo == null || !mounted) return;
 
     final now = DateTime.now();
@@ -56,8 +67,16 @@ class _AdherentPhotosScreenState extends State<AdherentPhotosScreen> {
     if (date == null || !mounted) return;
 
     // Sélection multiple : toutes les photos choisies sont importées avec
-    // la même date de prise de vue sélectionnée ci-dessus.
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
+    // la même date de prise de vue sélectionnée ci-dessus. Mêmes
+    // `maxWidth`/`maxHeight` que `_importFromCamera` (voir commentaire
+    // ci-dessus) — utile notamment pour un import groupé de vieilles photos
+    // d'archive, souvent plus lourdes qu'une photo prise directement dans
+    // l'app.
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 85,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (picked.isEmpty || !mounted) return;
 
     await _upload(picked, date, camera: false);

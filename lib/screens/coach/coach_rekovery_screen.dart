@@ -59,7 +59,7 @@ class CoachRekoveryScreen extends StatelessWidget {
     return Scaffold(
       appBar: WeekHeader(
         onLogout: () => auth.signOut(),
-        weekTypeContent: Text('REKOVERY', style: AppTheme.headerTitleStyle),
+        weekTypeContent: const Text('REKOVERY', style: AppTheme.headerTitleStyle),
       ),
       body: FutureBuilder<List<ClosureModel>>(
         future: planningRepo.fetchAllClosures(),

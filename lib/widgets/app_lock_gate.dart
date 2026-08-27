@@ -36,6 +36,17 @@ class AppLockGate extends StatefulWidget {
   final Widget child;
   const AppLockGate({super.key, required this.user, required this.child});
 
+  /// Permet à un autre écran (typiquement `LoginScreen` ou
+  /// `ColdStartReloginScreen`, juste après une reconnexion silencieuse
+  /// réussie protégée par sa propre biométrie — voir `credential_store.dart`)
+  /// de signaler que la biométrie vient déjà d'être validée pour ce
+  /// lancement de l'app. Sans cet appel, `AppLockGate` redéclencherait un
+  /// second prompt biométrique immédiatement après, ce qui serait redondant
+  /// et déroutant (27 août 2026).
+  static void markUnlockedThisLaunch() {
+    _AppLockGateState._unlockedThisLaunch = true;
+  }
+
   @override
   State<AppLockGate> createState() => _AppLockGateState();
 }

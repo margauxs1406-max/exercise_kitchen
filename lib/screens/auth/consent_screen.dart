@@ -47,9 +47,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
             Expanded(
               child: SingleChildScrollView(
                 padding: EdgeInsets.symmetric(horizontal: context.wp(24), vertical: context.hp(24)),
-                child: Column(
+                child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     _Section(
                       title: 'Finalités du traitement',
                       body:

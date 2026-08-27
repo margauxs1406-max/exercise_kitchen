@@ -116,7 +116,7 @@ class _AdherentHomeScreenState extends State<AdherentHomeScreen> {
           const NavigationDestination(icon: Icon(Icons.photo_library), label: 'Photos'),
           const NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Planning'),
           if (hasRekovery)
-            NavigationDestination(icon: const RekoveryNavIcon(), label: 'Rekovery'),
+            const NavigationDestination(icon: RekoveryNavIcon(), label: 'Rekovery'),
         ],
       ),
     );

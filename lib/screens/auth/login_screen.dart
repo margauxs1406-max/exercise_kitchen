@@ -6,7 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/auth_service.dart';
 import '../../services/biometric_auth_service.dart';
+import '../../services/credential_store.dart';
 import '../../services/user_repository.dart';
+import '../../widgets/app_lock_gate.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/responsive.dart';
 import '../../widgets/labeled_text_field.dart';
@@ -29,6 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _credentialStore = CredentialStore();
   bool _submitting = false;
   bool _settingUpBiometric = false;
   bool _obscurePassword = true;
@@ -62,14 +65,39 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    // Récupérés avant le premier `await` (plutôt qu'après, via `context.read`
+    // dans le corps de la fonction) : évite d'utiliser le `BuildContext` de
+    // cet écran après un "trou" asynchrone pendant lequel il pourrait avoir
+    // disparu (voir lint `use_build_context_synchronously`) — ces deux
+    // services restent de toute façon valables même si l'écran disparaît en
+    // cours de route (voir commentaire de [_useBiometricWithTypedPassword]
+    // ci-dessous pour le même raisonnement).
+    final authService = context.read<AuthService>();
+    final userRepo = context.read<UserRepository>();
     try {
-      await context.read<AuthService>().signIn(
-            email: email,
-            password: _passwordController.text,
-          );
+      await authService.signIn(email: email, password: password);
       // Connexion réussie : on mémorise l'email pour la prochaine fois.
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kRememberedEmailKey, email);
+      // 27 août 2026 : si la biométrie est déjà activée sur ce compte (par
+      // exemple après que les identifiants stockés ont été effacés suite à
+      // un changement de mot de passe — voir `CredentialStore`), une
+      // connexion classique par mot de passe les réarme silencieusement,
+      // sans prompt biométrique supplémentaire puisque le mot de passe vient
+      // déjà d'être vérifié par Firebase. Non bloquant si ça échoue : au
+      // pire il suffira de retaper une fois sur "Utiliser la biométrie".
+      try {
+        final uid = authService.firebaseUser?.uid;
+        if (uid != null) {
+          final user = await userRepo.watchUser(uid).first;
+          if (user != null && user.biometricUnlockEnabled) {
+            await _credentialStore.save(email: email, password: password);
+          }
+        }
+      } catch (_) {
+        // Voir commentaire ci-dessus : pas bloquant.
+      }
     } on FirebaseAuthException catch (e) {
       setState(() => _error = _friendlyMessage(e));
     } finally {
@@ -77,35 +105,60 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// Bouton "Activer la biométrie" (27 juillet 2026, à la demande de
-  /// Margaux) : surtout utile sur Android, où — contrairement à iPhone —
-  /// rien n'invite spontanément l'adhérent à enregistrer la biométrie après
-  /// sa première connexion. Sans ce bouton, la seule façon d'activer le
-  /// déverrouillage biométrique est de creuser jusqu'au profil adhérent une
-  /// fois connecté(e) — beaucoup ne le trouvent jamais et retapent leur mot
-  /// de passe à chaque lancement (voir `AppLockGate`).
+  /// Bouton "Utiliser la biométrie" (27 juillet 2026, renommé et complété le
+  /// 27 août 2026 à la demande de Margaux) : surtout utile sur Android, où —
+  /// contrairement à iPhone — rien n'invite spontanément l'adhérent à
+  /// enregistrer la biométrie après sa première connexion. Sans ce bouton,
+  /// la seule façon d'activer le déverrouillage biométrique est de creuser
+  /// jusqu'au profil adhérent une fois connecté(e) — beaucoup ne le trouvent
+  /// jamais et retapent leur mot de passe à chaque lancement (voir
+  /// `AppLockGate`).
   ///
-  /// Se connecte d'abord normalement (mêmes identifiants que le bouton
-  /// "Se connecter"), déclenche ensuite le prompt biométrique natif, puis
-  /// enregistre `biometricUnlockEnabled = true` sur le compte. La connexion
-  /// elle-même ne dépend pas de la réussite de la biométrie : si l'appareil
-  /// ne supporte pas la biométrie, ou si la personne annule le prompt, elle
-  /// reste connectée normalement (juste sans le déverrouillage biométrique
-  /// activé) plutôt que de tout annuler.
+  /// Deux cas, selon que le champ mot de passe est rempli ou non — voir
+  /// [_useBiometricWithTypedPassword] et [_useBiometricWithStoredCredentials]
+  /// ci-dessous pour le détail de chacun. Seul le champ email est requis
+  /// dans les deux cas.
+  Future<void> _useBiometric() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Email invalide');
+      return;
+    }
+    if (_passwordController.text.isEmpty) {
+      await _useBiometricWithStoredCredentials(email);
+    } else {
+      await _useBiometricWithTypedPassword(email);
+    }
+  }
+
+  /// Cas "mot de passe renseigné" : comportement historique du bouton
+  /// (27 juillet 2026) — se connecte normalement avec le mot de passe tapé,
+  /// déclenche le prompt biométrique natif, puis enregistre
+  /// `biometricUnlockEnabled = true` sur le compte ET les identifiants
+  /// (email + mot de passe) de façon chiffrée sur l'appareil (voir
+  /// `credential_store.dart`) — c'est cette étape qui permet ensuite les
+  /// reconnexions silencieuses (voir `ColdStartReloginScreen`) et le second
+  /// cas ci-dessous. La connexion elle-même ne dépend pas de la réussite de
+  /// la biométrie : si l'appareil ne la supporte pas, ou si la personne
+  /// annule le prompt, elle reste connectée normalement (juste sans le
+  /// déverrouillage biométrique activé) plutôt que de tout annuler.
   ///
   /// Aucun `setState` n'est bloqué par le fait que cet écran peut disparaître
   /// en cours de route (dès la connexion, `RoleGate` bascule immédiatement
   /// vers l'écran suivant) : chaque mise à jour d'état est protégée par
   /// `mounted`, mais l'appel Firestore lui-même continue et aboutit même si
   /// ce widget n'est plus affiché.
-  Future<void> _enableBiometricAndSignIn() async {
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _useBiometricWithTypedPassword(String email) async {
     setState(() {
       _settingUpBiometric = true;
       _error = null;
     });
-    final email = _emailController.text.trim();
+    final password = _passwordController.text;
     final biometric = BiometricAuthService();
+    // Récupérés avant le premier `await` — voir le commentaire équivalent
+    // dans `_submit` ci-dessus.
+    final authService = context.read<AuthService>();
+    final userRepo = context.read<UserRepository>();
     try {
       final supported = await biometric.isSupported;
       if (!supported) {
@@ -116,10 +169,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      await context.read<AuthService>().signIn(
-            email: email,
-            password: _passwordController.text,
-          );
+      await authService.signIn(email: email, password: password);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kRememberedEmailKey, email);
 
@@ -132,14 +182,83 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      final uid = context.read<AuthService>().firebaseUser?.uid;
-      if (uid != null && mounted) {
-        await context.read<UserRepository>().updateBiometricUnlockEnabled(uid, true);
+      final uid = authService.firebaseUser?.uid;
+      if (uid != null) {
+        await userRepo.updateBiometricUnlockEnabled(uid, true);
       }
+      await _credentialStore.save(email: email, password: password);
     } on FirebaseAuthException catch (e) {
       if (mounted) setState(() => _error = _friendlyMessage(e));
     } catch (e) {
       if (mounted) setState(() => _error = "Impossible d'activer la biométrie : $e");
+    } finally {
+      if (mounted) setState(() => _settingUpBiometric = false);
+    }
+  }
+
+  /// Cas "mot de passe laissé vide" (27 août 2026, à la demande de Margaux :
+  /// "le bouton [...] doit marcher, même si le mot de passe n'est pas
+  /// renseigné") : utilise les identifiants enregistrés lors d'une
+  /// précédente activation réussie (voir [_useBiometricWithTypedPassword]) —
+  /// prompt biométrique d'abord, puis connexion silencieuse seulement s'il
+  /// réussit. S'il n'y a rien d'enregistré (jamais activé, ou effacé suite à
+  /// une déconnexion/désactivation/changement de mot de passe), on l'indique
+  /// clairement plutôt que d'échouer sans explication.
+  Future<void> _useBiometricWithStoredCredentials(String email) async {
+    setState(() {
+      _settingUpBiometric = true;
+      _error = null;
+    });
+    final biometric = BiometricAuthService();
+    // Récupéré avant le premier `await` — voir le commentaire équivalent
+    // dans `_submit` ci-dessus.
+    final authService = context.read<AuthService>();
+    try {
+      final supported = await biometric.isSupported;
+      if (!supported) {
+        if (mounted) {
+          setState(() => _error =
+              "La biométrie n'est pas disponible sur cet appareil (empreinte / Face ID non configuré.e dans les réglages).");
+        }
+        return;
+      }
+
+      final stored = await _credentialStore.read();
+      if (stored == null) {
+        if (mounted) {
+          setState(() => _error =
+              "Aucune biométrie enregistrée sur cet appareil — connecte-toi une première fois avec ton mot de passe, puis appuie de nouveau ici.");
+        }
+        return;
+      }
+      if (stored.email.toLowerCase() != email.toLowerCase()) {
+        if (mounted) {
+          setState(() => _error =
+              "Ces identifiants biométriques correspondent à un autre compte — saisis ton mot de passe.");
+        }
+        return;
+      }
+
+      final authenticated = await biometric.authenticate();
+      if (!authenticated) {
+        if (mounted) setState(() => _error = 'Authentification annulée ou impossible.');
+        return;
+      }
+
+      await authService.signIn(email: stored.email, password: stored.password);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kRememberedEmailKey, stored.email);
+      // Évite un second prompt biométrique immédiat côté `AppLockGate` juste
+      // après cet écran (`RoleGate` l'affiche dès la connexion détectée).
+      AppLockGate.markUnlockedThisLaunch();
+    } on FirebaseAuthException catch (e) {
+      // Identifiants stockés devenus invalides (mot de passe changé depuis
+      // un autre appareil...) : on les efface pour éviter d'échouer en
+      // boucle silencieusement.
+      await _credentialStore.clear();
+      if (mounted) setState(() => _error = _friendlyMessage(e));
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Connexion biométrique impossible : $e');
     } finally {
       if (mounted) setState(() => _settingUpBiometric = false);
     }
@@ -276,14 +395,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                     : const Text('Se connecter'),
                               ),
                               // Section (profil adhérent), bouton ajouté le
-                              // 27 juillet 2026 : activation directe de la
-                              // biométrie depuis l'écran de connexion, voir
-                              // `_enableBiometricAndSignIn` ci-dessus.
+                              // 27 juillet 2026, renommé "Utiliser la
+                              // biométrie" et complété le 27 août 2026 : voir
+                              // `_useBiometric` ci-dessus — fonctionne aussi
+                              // mot de passe vide (repli sur les identifiants
+                              // enregistrés lors d'une précédente activation).
                               Center(
                                 child: TextButton(
                                   onPressed: (_submitting || _settingUpBiometric)
                                       ? null
-                                      : _enableBiometricAndSignIn,
+                                      : _useBiometric,
                                   child: _settingUpBiometric
                                       ? SizedBox(
                                           height: context.hp(16),
@@ -292,7 +413,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                               strokeWidth: 2, color: AppColors.white),
                                         )
                                       : const UnderlinedLink(
-                                          'Activer la biométrie',
+                                          'Utiliser la biométrie',
                                           color: AppColors.white,
                                         ),
                                 ),

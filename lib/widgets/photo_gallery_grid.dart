@@ -243,6 +243,24 @@ class _PhotoGalleryGridState extends State<PhotoGalleryGrid> {
                               child: Image.network(
                                 photo.url,
                                 fit: BoxFit.cover,
+                                // Décodage réduit à la taille réellement
+                                // affichée (24 août 2026, demande de Margaux
+                                // — chargement de la galerie trop lent) :
+                                // sans ça, chaque vignette 4-colonnes décode
+                                // et garde en mémoire l'image à sa résolution
+                                // d'origine (potentiellement plusieurs
+                                // milliers de pixels de large), même si elle
+                                // ne s'affiche que sur ~90px. `cacheWidth` ne
+                                // change rien au fichier réel (toujours
+                                // téléchargé en entier), mais accélère
+                                // nettement le décodage/l'affichage et réduit
+                                // la mémoire utilisée par la grille. La
+                                // visionneuse plein écran plus bas
+                                // (`_FullScreenPhotoGallery`) n'est elle
+                                // volontairement pas concernée, pour garder
+                                // la pleine résolution au zoom.
+                                cacheWidth:
+                                    (160 * MediaQuery.of(context).devicePixelRatio).round(),
                                 loadingBuilder: (context, child, progress) {
                                   if (progress == null) return child;
                                   return Container(

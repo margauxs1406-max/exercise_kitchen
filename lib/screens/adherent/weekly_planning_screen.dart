@@ -175,7 +175,7 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.white,
         surfaceTintColor: Colors.transparent,
-        title: Text(title),
+        title: const Text(title),
         content: Text(message),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
@@ -260,7 +260,7 @@ class _WeeklyPlanningScreenState extends State<WeeklyPlanningScreen> {
                     .toList();
                 return StreamBuilder<List<RegistrationModel>>(
                   stream: uid == null
-                      ? Stream<List<RegistrationModel>>.empty()
+                      ? const Stream<List<RegistrationModel>>.empty()
                       : regRepo.watchMyRegistrations(uid),
                   builder: (context, regSnapshot) {
                     final myRegistrations = {
