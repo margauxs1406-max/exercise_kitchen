@@ -93,6 +93,12 @@ class RekoveryRequestCard extends StatelessWidget {
   final bool showName;
   final bool isOwn;
   final bool colorByStatus;
+  // Écran adhérent uniquement (11 septembre 2026, anonymisation entre
+  // adhérents qui ne se connaissent pas) : nom déjà résolu par l'appelant
+  // (vrai nom, ou "Adhérent EK") — voir `adherent_rekovery_screen.dart`.
+  // `null` (comportement inchangé côté coach, qui voit toujours le vrai nom)
+  // retombe sur `request.adherentName`.
+  final String? displayName;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -102,6 +108,7 @@ class RekoveryRequestCard extends StatelessWidget {
     this.showName = false,
     this.isOwn = true,
     this.colorByStatus = false,
+    this.displayName,
     this.onTap,
     this.onLongPress,
   });
@@ -157,7 +164,7 @@ class RekoveryRequestCard extends StatelessWidget {
             colorFilter: ColorFilter.mode(avatarIconColor, BlendMode.srcIn),
           ),
         ),
-        title: Text(showName ? request.adherentName : 'Rekovery'),
+        title: Text(showName ? (displayName ?? request.adherentName) : 'Rekovery'),
         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: subtitleLines),
         isThreeLine: subtitleLines.length > 2,
         // Ajouté le 21 août 2026 (demande de Margaux) : sans ce réglage,

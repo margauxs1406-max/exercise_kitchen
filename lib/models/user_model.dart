@@ -104,6 +104,13 @@ class UserModel {
   /// (pas de barre de navigation, voir `adherent_home_screen.dart`).
   bool get isRekoverySoloOnly => formulas.length == 1 && formulas.contains('rekovery');
 
+  /// Onglet Rekovery (11 septembre 2026, demande de Margaux : anonymiser les
+  /// adhérents qui ne se connaissent pas entre eux) — un adhérent qui a la
+  /// formule "collectif" (même combinée à d'autres) fait partie du groupe
+  /// qui se croise déjà en cours collectif ; voir
+  /// `adherent_rekovery_screen.dart` pour la règle de visibilité complète.
+  bool get hasCollectifFormula => formulas.contains('collectif');
+
   factory UserModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data()!;
     return UserModel(

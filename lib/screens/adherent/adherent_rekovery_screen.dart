@@ -201,57 +201,102 @@ class AdherentRekoveryScreen extends StatelessWidget {
                               items.addAll(visible.where((r) => _dayOf(r.date) == day));
                             }
 
-                            return ListView.builder(
-                              padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
-                              itemCount: items.length,
-                              itemBuilder: (context, i) {
-                                final item = items[i];
-                                if (item is DateTime) {
-                                  return DayHeader(
-                                    date: item,
-                                    isFirst: i == 0,
-                                    firstTopPadding: context.hp(12),
-                                  );
-                                }
-                                if (item is ClosureModel) {
-                                  // Fermeture de salle — lecture seule ici
-                                  // (l'édition reste dans le planning
-                                  // principal, voir `weekly_planning_screen.dart`).
-                                  return ClosureBanner(closure: item);
-                                }
-                                if (item is RekoveryClosureModel) {
-                                  // Lecture seule côté adhérent (pas
-                                  // d'`onLongPress`) — seul le coach peut
-                                  // supprimer une fermeture Rekovery, voir
-                                  // `coach_rekovery_screen.dart`.
-                                  return RekoveryClosedDayCard(closure: item);
-                                }
-                                final request = item as RekoveryRequestModel;
-                                final isOwn = request.adherentUid == uid;
-                                final canAct = isOwn &&
-                                    (request.status == RekoveryRequestStatus.pending ||
-                                        request.status == RekoveryRequestStatus.proposed ||
-                                        request.status == RekoveryRequestStatus.accepted);
-                                return RekoveryRequestCard(
-                                  request: request,
-                                  // Nom affiché sur toutes les cartes (y compris
-                                  // les siennes) depuis le 6 août 2026 — voir
-                                  // doc de classe ci-dessus.
-                                  showName: true,
-                                  isOwn: isOwn,
-                                  // Couleurs par statut (10 août 2026, voir
-                                  // `RekoveryRequestCard.colorByStatus`) : sans
-                                  // effet sur les demandes des autres, `isOwn`
-                                  // filtrant déjà en interne.
-                                  colorByStatus: true,
-                                  // Appui long uniquement (6 août 2026), et
-                                  // seulement sur SA PROPRE demande : un simple
-                                  // tap ne déclenche plus les actions (annulation
-                                  // trop facile par accident), et personne ne
-                                  // peut agir sur la réservation d'un(e) autre.
-                                  onLongPress: canAct
-                                      ? () => showRekoveryRequestActionsSheet(context, request)
-                                      : null,
+                            // Anonymisation (11 septembre 2026, demande de
+                            // Margaux : "anonymiser les gens qui ne se
+                            // connaissent pas") : il faut connaître les
+                            // formules des AUTRES adhérents apparaissant
+                            // dans `visible` pour savoir si leur vrai nom
+                            // peut être montré (voir la règle complète plus
+                            // bas, à l'endroit où `displayName` est calculé).
+                            final otherUids = visible
+                                .where((r) => r.adherentUid != uid)
+                                .map((r) => r.adherentUid)
+                                .toSet()
+                                .toList();
+
+                            return FutureBuilder<Map<String, UserModel>>(
+                              future: userRepo.getUsersByIds(otherUids),
+                              builder: (context, othersSnapshot) {
+                                final others =
+                                    othersSnapshot.data ?? const <String, UserModel>{};
+
+                                return ListView.builder(
+                                  padding: EdgeInsets.symmetric(horizontal: context.wp(12)),
+                                  itemCount: items.length,
+                                  itemBuilder: (context, i) {
+                                    final item = items[i];
+                                    if (item is DateTime) {
+                                      return DayHeader(
+                                        date: item,
+                                        isFirst: i == 0,
+                                        firstTopPadding: context.hp(12),
+                                      );
+                                    }
+                                    if (item is ClosureModel) {
+                                      // Fermeture de salle — lecture seule ici
+                                      // (l'édition reste dans le planning
+                                      // principal, voir `weekly_planning_screen.dart`).
+                                      return ClosureBanner(closure: item);
+                                    }
+                                    if (item is RekoveryClosureModel) {
+                                      // Lecture seule côté adhérent (pas
+                                      // d'`onLongPress`) — seul le coach peut
+                                      // supprimer une fermeture Rekovery, voir
+                                      // `coach_rekovery_screen.dart`.
+                                      return RekoveryClosedDayCard(closure: item);
+                                    }
+                                    final request = item as RekoveryRequestModel;
+                                    final isOwn = request.adherentUid == uid;
+                                    final canAct = isOwn &&
+                                        (request.status == RekoveryRequestStatus.pending ||
+                                            request.status == RekoveryRequestStatus.proposed ||
+                                            request.status == RekoveryRequestStatus.accepted);
+                                    // Règle d'anonymisation (11 septembre
+                                    // 2026) : le vrai nom d'un(e) AUTRE
+                                    // adhérent(e) n'est visible que si LES
+                                    // DEUX (la personne qui regarde ET celle
+                                    // qui a réservé) ont la formule
+                                    // "collectif" — elles se croisent déjà
+                                    // réellement en cours collectif. Dans
+                                    // tous les autres cas (l'une des deux —
+                                    // ou les deux — n'a que duo+rekovery,
+                                    // individuel+rekovery, ou rekovery seul),
+                                    // le nom est remplacé par "Adhérent EK".
+                                    // Ne s'applique jamais à sa propre
+                                    // demande (`displayName` reste `null`,
+                                    // `RekoveryRequestCard` retombe alors sur
+                                    // `request.adherentName`, le vrai nom).
+                                    String? displayName;
+                                    if (!isOwn) {
+                                      final requester = others[request.adherentUid];
+                                      final bothCollectif = user.hasCollectifFormula &&
+                                          (requester?.hasCollectifFormula ?? false);
+                                      displayName = bothCollectif ? null : 'Adhérent EK';
+                                    }
+                                    return RekoveryRequestCard(
+                                      request: request,
+                                      // Nom affiché sur toutes les cartes (y compris
+                                      // les siennes) depuis le 6 août 2026 — voir
+                                      // doc de classe ci-dessus ; anonymisé ou non
+                                      // selon `displayName` ci-dessus.
+                                      showName: true,
+                                      displayName: displayName,
+                                      isOwn: isOwn,
+                                      // Couleurs par statut (10 août 2026, voir
+                                      // `RekoveryRequestCard.colorByStatus`) : sans
+                                      // effet sur les demandes des autres, `isOwn`
+                                      // filtrant déjà en interne.
+                                      colorByStatus: true,
+                                      // Appui long uniquement (6 août 2026), et
+                                      // seulement sur SA PROPRE demande : un simple
+                                      // tap ne déclenche plus les actions (annulation
+                                      // trop facile par accident), et personne ne
+                                      // peut agir sur la réservation d'un(e) autre.
+                                      onLongPress: canAct
+                                          ? () => showRekoveryRequestActionsSheet(context, request)
+                                          : null,
+                                    );
+                                  },
                                 );
                               },
                             );
