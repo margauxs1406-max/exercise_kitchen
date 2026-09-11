@@ -55,6 +55,24 @@ android {
         release {
             // Signature réelle (clé "upload"), voir keystoreProperties ci-dessus.
             signingConfig = signingConfigs.getByName("release")
+            // Activé le 11 septembre 2026 (avertissement Play Console "Améliorez
+            // la mémoire et les performances de votre appli avec l'optimisation
+            // R8" sur le tableau de bord des releases) : le R8/tree-shaking Dart
+            // de Flutter est déjà actif par défaut en release, mais PAS le
+            // minify/shrink côté Gradle (bytecode Java/Kotlin des plugins), qui
+            // est ce que Play Console mesure ici — d'où l'activation explicite
+            // ci-dessous. Règles de conservation nécessaires (Firebase,
+            // flutter_secure_storage, local_auth) dans proguard-rules.pro.
+            // IMPORTANT : à tester en conditions réelles (build --release, pas
+            // debug/profile) sur connexion, biométrie, notifications et photos
+            // avant publication, le R8 pouvant casser du code utilisant la
+            // réflexion s'il manque une règle de conservation.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
